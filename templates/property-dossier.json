@@ -1,0 +1,166 @@
+{
+  "property_id": "",
+  "agent": {
+    "name": "",
+    "ipi_number": "",
+    "agency": ""
+  },
+  "seller": {
+    "name": "",
+    "phone": "",
+    "email": "",
+    "mandate_type": "",
+    "mandate_start": "",
+    "mandate_end": "",
+    "mandate_duration_months": 0,
+    "commission_rate": 0.0
+  },
+  "property": {
+    "address": "",
+    "postal_code": "",
+    "commune": "",
+    "region": "",
+    "capakey": "",
+    "type": "",
+    "year_built": 0,
+    "surface_habitable": 0,
+    "surface_terrain": 0,
+    "bedrooms": 0,
+    "bathrooms": 0,
+    "garage": false,
+    "garden": false,
+    "cellar": false,
+    "terrasse": false,
+    "ascenseur": false,
+    "condition": "",
+    "copropriete": false,
+    "charges_copro_monthly": 0,
+    "citerne_mazout": false,
+    "price_asked": 0,
+    "immoweb_url": "",
+    "cadastral_income": 0
+  },
+  "status": "INTAKE",
+  "documents": {
+    "ru": {
+      "status": "NOT_STARTED",
+      "reference": null,
+      "portal": null,
+      "requested_at": null,
+      "received_at": null,
+      "expires_at": null,
+      "drive_file_id": null
+    },
+    "peb": {
+      "status": "NOT_STARTED",
+      "reference": null,
+      "score": null,
+      "score_value": null,
+      "certificateur": null,
+      "certificateur_email": null,
+      "rdv_date": null,
+      "received_at": null,
+      "expires_at": null,
+      "drive_file_id": null
+    },
+    "controle_electrique": {
+      "status": "NOT_STARTED",
+      "reference": null,
+      "conforme": null,
+      "organisme": null,
+      "organisme_email": null,
+      "rdv_date": null,
+      "received_at": null,
+      "expires_at": null,
+      "drive_file_id": null
+    },
+    "attestation_sol": {
+      "status": "NOT_STARTED",
+      "reference": null,
+      "categorie": null,
+      "received_at": null,
+      "expires_at": null,
+      "drive_file_id": null
+    },
+    "titre_propriete": {
+      "status": "NOT_STARTED",
+      "source": null,
+      "received_at": null,
+      "drive_file_id": null
+    },
+    "extrait_cadastral": {
+      "status": "NOT_STARTED",
+      "received_at": null,
+      "drive_file_id": null
+    },
+    "bodemattest": {
+      "status": "NOT_APPLICABLE",
+      "reference": null,
+      "received_at": null,
+      "drive_file_id": null
+    },
+    "watertoets": {
+      "status": "NOT_APPLICABLE",
+      "p_score": null,
+      "g_score": null,
+      "received_at": null,
+      "drive_file_id": null
+    },
+    "asbestattest": {
+      "status": "NOT_APPLICABLE",
+      "reference": null,
+      "expert": null,
+      "expert_email": null,
+      "rdv_date": null,
+      "received_at": null,
+      "expires_at": null,
+      "drive_file_id": null
+    },
+    "citerne_mazout": {
+      "status": "NOT_APPLICABLE",
+      "type_citerne": null,
+      "capacite": null,
+      "technicien": null,
+      "technicien_email": null,
+      "rdv_date": null,
+      "received_at": null,
+      "drive_file_id": null
+    },
+    "copropriete": {
+      "status": "NOT_APPLICABLE",
+      "syndic_name": null,
+      "syndic_email": null,
+      "syndic_phone": null,
+      "docs_received": [],
+      "received_at": null,
+      "drive_file_id": null
+    },
+    "diu": {
+      "status": "NOT_APPLICABLE",
+      "received_at": null,
+      "drive_file_id": null
+    }
+  },
+  "pipeline_sheet_row": null,
+  "drive_folder_id": "",
+  "drive_folder_url": "",
+  "photos": [],
+  "listings": {
+    "immoweb": {
+      "url": null,
+      "published_at": null
+    },
+    "deuxieme_main": {
+      "url": null,
+      "published_at": null
+    },
+    "facebook": {
+      "published_at": null
+    }
+  },
+  "leads": [],
+  "offers": [],
+  "crons": [],
+  "created_at": "",
+  "updated_at": ""
+}

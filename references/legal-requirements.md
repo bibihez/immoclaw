@@ -1,0 +1,1 @@
+../../fsbo-vendeur/references/legal-requirements.md

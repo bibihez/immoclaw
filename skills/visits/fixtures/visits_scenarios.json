@@ -1,0 +1,225 @@
+{
+  "scenarios": [
+    {
+      "name": "Immoweb lead is routed to visits as a new lead",
+      "type": "inbound_new_lead",
+      "email": {
+        "from": "info@immoweb.be",
+        "subject": "Un visiteur souhaite plus d'informations",
+        "body": "Nom : Destrebecq, Frederic\nTelephone : 0470000000\nAdresse mail : frederic@example.com\nDetails de la demande : Je souhaite visiter le bien.\nAdresse : Zeypestraat 44, 1602 Leeuw-Saint-Pierre"
+      },
+      "expected": {
+        "route_to": "visits",
+        "message_type": "new_lead"
+      }
+    },
+    {
+      "name": "Qualified sale reply becomes qualified and hot",
+      "type": "qualification_reply",
+      "reply": {
+        "purchase_purpose": "live in",
+        "budget": "485000",
+        "property_price": "495000",
+        "financing_status": "pre-approved",
+        "project_timing": "within 3 months",
+        "interest_reason": "We like the garden and the layout for our family",
+        "availability": "weekday afternoons"
+      },
+      "expected": {
+        "lead_status": "qualified",
+        "qualification_rating": "hot"
+      }
+    },
+    {
+      "name": "Unclear budget and no financing path stays weak or closed",
+      "type": "qualification_reply",
+      "reply": {
+        "purchase_purpose": "",
+        "budget": "",
+        "property_price": "495000",
+        "financing_status": "not started",
+        "project_timing": "unknown",
+        "interest_reason": "I am mostly curious to see the house",
+        "days_silent_after_qualification": 4
+      },
+      "expected": {
+        "lead_status": "closed",
+        "qualification_rating": "reject"
+      }
+    },
+    {
+      "name": "Slot proposal returns at least three realistic openings",
+      "type": "slot_proposal",
+      "now": "2026-03-11T10:00:00+01:00",
+      "working_hours": ["09:00", "18:00"],
+      "lead": {
+        "commune": "Ixelles"
+      },
+      "calendar_events": [
+        {
+          "start": "2026-03-12T09:00:00+01:00",
+          "end": "2026-03-12T10:00:00+01:00",
+          "commune": "Ixelles"
+        },
+        {
+          "start": "2026-03-12T13:00:00+01:00",
+          "end": "2026-03-12T14:00:00+01:00",
+          "commune": "Uccle"
+        },
+        {
+          "start": "2026-03-13T11:30:00+01:00",
+          "end": "2026-03-13T12:30:00+01:00",
+          "commune": "Ixelles"
+        }
+      ],
+      "expected": {
+        "minimum_slots": 3
+      }
+    },
+    {
+      "name": "Best slot prefers a nearby appointment when available",
+      "type": "slot_proposal",
+      "now": "2026-03-11T10:00:00+01:00",
+      "working_hours": ["09:00", "20:00"],
+      "lead": {
+        "commune": "Ixelles"
+      },
+      "calendar_events": [
+        {
+          "start": "2026-03-12T15:00:00+01:00",
+          "end": "2026-03-12T16:00:00+01:00",
+          "commune": "Saint-Gilles"
+        }
+      ],
+      "expected": {
+        "minimum_slots": 3,
+        "first_slot_prefix": "2026-03-12T16:15"
+      }
+    },
+    {
+      "name": "Personal events block afternoon visit proposals",
+      "type": "slot_proposal",
+      "now": "2026-03-11T10:00:00+01:00",
+      "working_hours": ["09:00", "20:00"],
+      "lead": {
+        "commune": "Ixelles"
+      },
+      "calendar_events": [
+        {
+          "start": "2026-03-12T13:00:00+01:00",
+          "end": "2026-03-12T14:00:00+01:00",
+          "commune": "Ixelles",
+          "category": "personal"
+        }
+      ],
+      "expected": {
+        "minimum_slots": 3,
+        "blocked_prefixes": ["2026-03-12T13:00", "2026-03-12T13:15", "2026-03-12T13:30", "2026-03-12T13:45"]
+      }
+    },
+    {
+      "name": "Booking conflict triggers a fresh proposal",
+      "type": "booking_conflict",
+      "now": "2026-03-11T10:00:00+01:00",
+      "working_hours": ["09:00", "18:00"],
+      "lead": {
+        "commune": "Ixelles"
+      },
+      "requested_slot": {
+        "start": "2026-03-12T14:15:00+01:00",
+        "end": "2026-03-12T15:00:00+01:00"
+      },
+      "calendar_events": [
+        {
+          "start": "2026-03-12T14:00:00+01:00",
+          "end": "2026-03-12T15:00:00+01:00",
+          "commune": "Ixelles"
+        }
+      ],
+      "expected": {
+        "conflict": true,
+        "minimum_replacement_slots": 3
+      }
+    },
+    {
+      "name": "Agent receives a proactive suggestion when no visit is yet planned",
+      "type": "agent_suggestion",
+      "now": "2026-03-11T10:00:00+01:00",
+      "working_hours": ["09:00", "20:00"],
+      "lead": {
+        "commune": "Ixelles"
+      },
+      "calendar_events": [],
+      "expected": {
+        "suggested_day_prefix": "2026-03-12T13:00",
+        "reason": "calendar is empty but visit hours allow a proactive proposal"
+      }
+    },
+    {
+      "name": "Urgent next-day request with uncertain schedule escalates",
+      "type": "urgent_request",
+      "now": "2026-03-11T18:00:00+01:00",
+      "requested_slot": {
+        "start": "2026-03-12T10:00:00+01:00",
+        "end": "2026-03-12T10:45:00+01:00"
+      },
+      "calendar_visibility": "incomplete",
+      "expected": {
+        "escalate": true
+      }
+    },
+    {
+      "name": "Unknown capacity triggers an agent question instead of grouped assumption",
+      "type": "capacity_guardrail",
+      "property": {
+        "capacity_known": false,
+        "grouped_visit_requested": true
+      },
+      "expected": {
+        "ask_agent": true
+      }
+    },
+    {
+      "name": "Weekly planning groups qualified leads into clusters",
+      "type": "weekly_planning",
+      "now": "2026-03-13T17:00:00+01:00",
+      "working_hours": ["09:00", "18:00"],
+      "leads": [
+        {
+          "status": "qualified",
+          "cluster": "Ixelles-Saint-Gilles",
+          "commune": "Ixelles",
+          "property_address": "Rue de la Loi 16"
+        },
+        {
+          "status": "qualified",
+          "cluster": "Ixelles-Saint-Gilles",
+          "commune": "Saint-Gilles",
+          "property_address": "Chaussee de Waterloo 350"
+        },
+        {
+          "status": "visit_proposed",
+          "cluster": "Schaerbeek",
+          "commune": "Schaerbeek",
+          "property_address": "Avenue Louis Bertrand 12"
+        }
+      ],
+      "calendar_events": [
+        {
+          "start": "2026-03-16T09:00:00+01:00",
+          "end": "2026-03-16T11:00:00+01:00",
+          "commune": "Bruxelles"
+        },
+        {
+          "start": "2026-03-17T15:00:00+01:00",
+          "end": "2026-03-17T16:00:00+01:00",
+          "commune": "Uccle"
+        }
+      ],
+      "expected": {
+        "minimum_clusters": 2,
+        "requires_approval_prompt": true
+      }
+    }
+  ]
+}

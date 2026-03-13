@@ -2,13 +2,13 @@
 name: visits
 description: >
   Manage property visits for a Belgian real-estate agent: parse Immoweb leads,
-  run pre-qualification by email, propose visit slots from calendar availability,
-  proactively discuss visit timing with the agent on Telegram, book confirmed
-  visits, send agent briefing cards, and follow up for feedback.
+  run sale-side pre-qualification by email, propose visit slots from calendar
+  availability, proactively discuss visit timing with the agent on Telegram,
+  book confirmed visits, send agent briefing cards, and follow up for feedback.
 user-invocable: true
 metadata:
   author: TreeLaunch
-  version: 1.2.0
+  version: 1.3.0
   category: real-estate
   tags: [agent-immo, belgique, immobilier, visits, scheduling, immoweb]
 ---
@@ -45,6 +45,14 @@ Default behavior in OpenClaw:
 4. ask the agent on Telegram for a quick validation or adjustment
 5. contact the lead only after that validation unless the setup explicitly allows auto-send
 
+## MVP Scope
+
+This version of `visits` is for property sales only.
+
+- Qualify purchase intent, budget, financing, and timing.
+- Do not add rental-specific qualification logic yet.
+- If the business later expands into rentals, add that as a separate extension instead of overloading this MVP.
+
 ## Triggering
 
 Use this skill when:
@@ -61,14 +69,19 @@ Typical user phrases:
 
 ## Required Inputs
 
-Expect these values before acting:
+Minimum useful inputs:
 
-- `{USER.google.calendar_id}`; default to `primary`
+- a readable calendar source such as `{USER.google.calendar_id}`; default to `primary`
 - `{USER.preferences.working_hours}` such as `09:00-20:00`
+- an inbound email path through `comms` or a forwarding inbox
+- Telegram access through OpenClaw
+- email templates for qualification, slot proposal, and visit feedback
+
+Optional but useful:
+
 - `{USER.google.pipeline_sheet_id}`
 - access to the Pipeline Sheet tabs `Properties` and `Leads`
-- email templates for qualification, slot proposal, and visit feedback
-- Telegram access through OpenClaw
+- property-level constraints already stored somewhere
 
 Useful optional preferences:
 
@@ -77,7 +90,7 @@ Useful optional preferences:
 - `{USER.preferences.preferred_visit_days}`
 - `{USER.preferences.zone_preferences}` such as `Bruxelles sud le mardi`
 
-If one dependency is missing, continue with the parts you can do and clearly note the missing dependency in the handoff or draft.
+Gmail direct access is not mandatory if `comms` or a forwarding inbox already provides the lead content. A Google Sheet is also optional. If no sheet exists yet, operate with task memory and suggest a minimal tracking schema only if needed.
 
 ## Operating Rules
 
@@ -87,14 +100,18 @@ If one dependency is missing, continue with the parts you can do and clearly not
 - Always check the current calendar immediately before offering or booking a slot.
 - Default visit duration is `45 min`.
 - Add `15-30 min` travel buffer when the previous or next appointment is in another commune.
+- Treat personal calendar events as unavailable.
 - If no visit is already planned, still suggest a slot when the calendar shows reasonable free time.
 - Ask the agent on Telegram before contacting the lead when the best slot depends on local convenience, route logic, or soft preferences.
 - If the requested slot is no longer free, apologize and send a fresh proposal with 2 to 3 new slots.
+- Prefer afternoon visits by default unless the agent's preferences override this.
 - Prefer visit suggestions between `09:00` and `20:00` unless the agent's preferences say otherwise.
+- Use actual travel information if available. If not, fall back to rough Brussels zone logic.
+- Never assume grouped capacity or multi-visitor rules for a property unless the agent explicitly gave that rule.
 
 ## Lead Status Model
 
-Use these statuses in the `Leads` sheet:
+Use these statuses in the `Leads` sheet or any minimal tracking store:
 
 - `new`: lead created, not yet contacted
 - `awaiting_qualification`: qualification email sent
@@ -106,6 +123,23 @@ Use these statuses in the `Leads` sheet:
 - `closed`: not moving forward
 
 If the existing sheet uses different labels, map them conservatively instead of inventing a new schema mid-run.
+
+### Qualification Rating
+
+Keep lead status and qualification rating separate.
+
+Use this derived rating in notes, Telegram summaries, and decision logic:
+
+- `hot`: budget coherent, financing credible, clear project, strong motivation
+- `medium`: likely relevant, but one important point is still unclear
+- `weak`: vague motivation, unclear budget, weak financing signal, or slow response
+- `reject`: clearly unrealistic, explicitly curious only, or not worth scheduling
+
+The rating does not replace the lead status model. Typical mapping:
+
+- `hot` or `medium` -> lead can still move to `qualified`
+- `weak` -> usually remain in `awaiting_qualification` until clarified
+- `reject` -> usually move to `closed`
 
 ## Core Flow
 
@@ -120,11 +154,11 @@ When `comms` forwards an Immoweb email such as `Un visiteur souhaite plus d'info
    - requested property address
    - raw lead message
 2. Match the requested address against the `Properties` tab and recover `{property_id}`.
-3. Append a new row in `Leads`.
+3. If a `Leads` sheet exists, append a new row there. Otherwise store the lead in working memory or the internal tracking layer.
 4. Set status to `new`.
 5. Immediately continue to the qualification step.
 
-Example append command:
+Example append command if a pipeline sheet exists:
 
 ```bash
 gws sheets spreadsheets.values append --params '{"spreadsheetId": "{USER.google.pipeline_sheet_id}", "range": "Leads!A:N", "valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"}' --body '{"values": [["{new_lead_id}", "{property_id}", "{lead_name}", "{lead_phone}", "{lead_email}", "", "", "", "new", "", "{message_source}", "", "", "{date_iso}"]]}'
@@ -134,14 +168,15 @@ If the property match is ambiguous, stop at draft stage and ask the agent to con
 
 ### 2. Automatic Pre-Qualification
 
-This is the main addition to the original flow. For new inbound leads, send a qualification email before proposing a visit.
+This is the main addition to the original flow. For new inbound sale leads, send a qualification email before proposing a visit.
 
 The qualification email should be short and aimed at operational filtering. Ask only the minimum useful questions:
 
-- desired timing for purchase or move
+- whether they want to buy to live in the property or invest
+- approximate budget
 - financing status: own funds, mortgage in progress, pre-approved, or not started
-- household/project context
-- whether they already visited similar properties or sold their current home
+- desired purchase timing
+- what interests them specifically about the property
 - preferred availability windows for a visit
 
 Output goes to `comms` for an approval or auto-send flow, depending on the environment.
@@ -154,11 +189,29 @@ After sending:
 When a reply arrives:
 
 1. summarize the answers
-2. decide whether the lead is qualified enough for a visit
-3. update the sheet with the summary
-4. move the lead to `qualified` or `closed`
+2. compute a qualification rating: `hot`, `medium`, `weak`, or `reject`
+3. note the main red flags, budget signal, and financing signal
+4. update the sheet, CRM, or working memory with the summary
+5. move the lead to `qualified`, keep it in `awaiting_qualification`, or move it to `closed`
 
 Qualification should stay permissive. The goal is not strict rejection; it is to avoid wasting visit slots on clearly unready leads.
+
+Red flags to watch for:
+
+- explicitly curious wording such as `je suis juste curieux`
+- no budget disclosed after qualification
+- budget clearly below property level
+- financing not started or unrealistic for the price level
+- vague or inconsistent motivation
+- pressure to visit immediately without basic seriousness
+- silence after qualification questions
+
+Recommended rating logic:
+
+- `hot`: coherent budget, credible financing, clear timing, good reason to visit
+- `medium`: one major unknown remains, but the lead still looks serious
+- `weak`: several unknowns remain, or silence weakens confidence
+- `reject`: budget is unrealistic, financing path is absent, or motivation is clearly not serious
 
 ### 3. Slot Proposal
 
@@ -172,9 +225,16 @@ gws calendar events list --params '{"calendarId": "{USER.google.calendar_id}", "
 
 2. Generate 2 to 3 realistic visit options inside working hours.
 3. Prefer grouped tours when several qualified leads exist in the same area.
-4. If one option is clearly better, suggest it to the agent on Telegram before contacting the lead.
-5. Send the slot proposal via `comms` once the agent approves, adjusts, or the setup explicitly allows autonomy.
-6. Update lead status to `visit_proposed`.
+4. Rank slots in this order:
+   - actual calendar constraints and conflicts
+   - nearby existing visits
+   - preferred hours and days
+   - rough Brussels zone logic if exact travel data is unavailable
+5. If one option is clearly better, suggest it to the agent on Telegram before contacting the lead.
+6. Prefer afternoon slots by default unless preferences or an existing nearby appointment make another time better.
+7. If visitor capacity rules matter and are unknown, ask the agent instead of assuming grouped visits.
+8. Send the slot proposal via `comms` once the agent approves, adjusts, or the setup explicitly allows autonomy.
+9. Update lead status to `visit_proposed`.
 
 The proposal should contain:
 
@@ -203,6 +263,26 @@ Je propose ce créneau au lead ? (ok / autre heure / autre jour)
 
 If the calendar is empty, the skill should still propose a concrete slot rather than saying only that nothing is planned.
 
+Use this compact internal summary pattern:
+
+- property
+- lead name
+- qualification rating
+- budget / financing signal
+- main red flag if any
+- best slot
+- one-line routing reason
+- explicit ask: `OK ?`
+
+Example:
+
+```text
+[Ixelles - Rue de la Loi 16] Marie Martin.
+Lead hot. Budget cohérent, accord de principe. Aucun red flag majeur.
+Meilleur créneau: jeudi 17h30. Logique avec ton RDV à Uccle à 16h.
+OK pour proposer ?
+```
+
 Reasoning order:
 
 1. same-zone adjacency to an existing visit
@@ -210,6 +290,8 @@ Reasoning order:
 3. preferred visit hours and days
 4. weekly cluster building
 5. fallback to a reasonable free slot and ask the agent
+
+If capacity rules are unknown and the proposed slot may create grouped visits, ask that question in the same Telegram note instead of assuming a max visitor count.
 
 ### 4. Confirmation and Calendar Booking
 
@@ -222,7 +304,7 @@ When the lead confirms one slot:
 gws calendar events insert --params '{"calendarId": "{USER.google.calendar_id}"}' --body '{"summary": "[Visite] {adresse} - {lead_name}", "start": {"dateTime": "{selected_start_time}"}, "end": {"dateTime": "{selected_end_time}"}, "description": "Tel: {lead_phone}\nEmail: {lead_email}\nProperty ID: {property_id}"}'
 ```
 
-3. Update the lead row:
+3. Update the lead row if a sheet or CRM exists. Otherwise keep the state in working memory:
    - status: `visit_scheduled`
    - scheduled datetime
 4. Notify the agent on Telegram.
@@ -272,7 +354,7 @@ At `visit + 2h`:
 1. prepare a feedback email draft with the appropriate language template
 2. send it through `comms`
 3. when the reply arrives, summarize the feedback
-4. write the summary back to the sheet
+4. write the summary back to the sheet or internal tracking store
 5. notify the agent
 
 Notification format:
@@ -284,13 +366,49 @@ Notification format:
 
 Update status to `feedback_received` when done.
 
+## Structured Output Patterns
+
+When the skill reasons about a lead or a proposed visit, prefer these compact output shapes.
+
+### Lead Summary
+
+- Property
+- Lead
+- Source
+- Lead status
+- Qualification rating
+- Budget / financing signal
+- Motivation
+- Main risks or red flags
+
+### Slot Recommendation
+
+- Best slot
+- Alternatives
+- Routing rationale
+- Capacity or calendar constraints noticed
+
+### Draft Lead Email
+
+- Qualification email
+- Slot proposal email
+- Confirmation email
+- Cancellation or reschedule email
+
+### Telegram Note To Agent
+
+- very short
+- decision-ready
+- include `OK ?` or another explicit action ask
+- include uncertainty if calendar visibility or capacity is incomplete
+
 ## Proactive Weekly Planning
 
 Use this when the agent wants the system to suggest visit windows proactively from the synced calendar.
 
 Run every Friday at `17:00`, on heartbeat, or on demand:
 
-1. read all leads with status `qualified` or `visit_proposed` and no confirmed visit date
+1. read all leads with status `qualified` or `visit_proposed` and no confirmed visit date from the sheet, CRM, or internal tracking store
 2. group them by geographic cluster using commune, postcode, and travel time if available
 3. inspect next week's calendar for blocks of `2-3h`
 4. assign clusters to those blocks with travel buffers
@@ -346,9 +464,16 @@ If the agent asks for an open house:
 
 Prefer fixed 30-minute slots and avoid overbooking.
 
-## Failure Modes
+## Exceptions and Failure Modes
 
 - Missing phone number: continue by email only.
 - Unclear property match: ask the agent before creating visit proposals.
-- Calendar conflict: regenerate slots instead of forcing a booking.
+- Calendar conflict or double booking: regenerate slots instead of forcing a booking.
+- Property visitor capacity reached: surface the limit and ask the agent for the next decision.
+- Agent slow to answer: do not auto-confirm; send a short reminder on Telegram.
+- Lead silent after qualification: downgrade confidence and nudge the agent if the lead was otherwise promising.
+- Lead silent after slot proposal: keep the thread open, but do not over-commit or spam follow-ups unless instructed.
+- Property under option, sold, or unavailable: stop scheduling and notify the agent.
+- Urgent next-day request with uncertain availability: escalate to the agent, do not auto-commit.
 - Weak qualification response: keep the conversation moving, but do not allocate premium time slots until readiness is clearer.
+- Incomplete calendar visibility: state the uncertainty clearly and ask for validation.

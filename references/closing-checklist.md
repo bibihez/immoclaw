@@ -1,0 +1,1 @@
+../../fsbo-vendeur/references/closing-checklist.md
