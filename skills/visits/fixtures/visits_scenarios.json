@@ -14,7 +14,7 @@
       }
     },
     {
-      "name": "French Google Form submission becomes qualified and hot",
+      "name": "French qualification form submission becomes qualified and hot",
       "type": "form_submission",
       "reply": {
         "purchase_purpose": "Habiter",
@@ -38,7 +38,7 @@
       }
     },
     {
-      "name": "Dutch Google Form submission with unclear financing stays form_sent",
+      "name": "Dutch qualification form submission with unclear financing stays form_sent",
       "type": "form_submission",
       "reply": {
         "purchase_purpose": "Wonen",
@@ -62,7 +62,7 @@
       }
     },
     {
-      "name": "Curious-only Google Form submission is rejected",
+      "name": "Curious-only qualification form submission is rejected",
       "type": "form_submission",
       "reply": {
         "purchase_purpose": "",
@@ -75,6 +75,33 @@
       "expected": {
         "lead_status": "closed",
         "qualification_rating": "reject"
+      }
+    },
+    {
+      "name": "Form submission can be matched through the internal lead reference",
+      "type": "lead_store_ingestion",
+      "submission": {
+        "lead_ref": "lead_123",
+        "email": "frederic@example.com",
+        "purchase_purpose": "Habiter",
+        "budget": "300.000 - 400.000 EUR",
+        "property_price": "350000",
+        "financing_status": "Credit avec accord de principe",
+        "project_timing": "1 a 3 mois",
+        "interest_reason": "Nous aimons le jardin et la disposition pour notre famille",
+        "preferred_days": "Mardi apres-midi, Jeudi matin"
+      },
+      "lead_store": [
+        {
+          "lead_id": "lead_123",
+          "email": "frederic@example.com",
+          "status": "form_sent"
+        }
+      ],
+      "expected": {
+        "matched_lead_id": "lead_123",
+        "processed": true,
+        "qualification_rating": "hot"
       }
     },
     {
@@ -164,6 +191,28 @@
       }
     },
     {
+      "name": "Calendar booking prefers the primary calendar mode",
+      "type": "calendar_booking_mode",
+      "calendar_connection": {
+        "primary_available": true,
+        "fallback_available": true
+      },
+      "expected": {
+        "calendar_mode": "primary"
+      }
+    },
+    {
+      "name": "Calendar booking falls back to a dedicated calendar when primary is unavailable",
+      "type": "calendar_booking_mode",
+      "calendar_connection": {
+        "primary_available": false,
+        "fallback_available": true
+      },
+      "expected": {
+        "calendar_mode": "fallback"
+      }
+    },
+    {
       "name": "Booking conflict triggers a fresh proposal",
       "type": "booking_conflict",
       "now": "2026-03-11T10:00:00+01:00",
@@ -185,6 +234,19 @@
       "expected": {
         "conflict": true,
         "minimum_replacement_slots": 3
+      }
+    },
+    {
+      "name": "Pilot onboarding stays client-light without a backoffice",
+      "type": "onboarding_surface",
+      "setup": {
+        "email_channel": "agentmail",
+        "calendar_connection": "google_primary",
+        "telegram_connected": true,
+        "client_backoffice_required": false
+      },
+      "expected": {
+        "smooth_onboarding": true
       }
     },
     {
