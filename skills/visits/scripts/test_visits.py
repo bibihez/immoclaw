@@ -638,6 +638,41 @@ def simulate_form_submission(scenario: dict[str, Any]) -> ScenarioResult:
     return ScenarioResult(scenario["name"], passed, details)
 
 
+def simulate_lead_store_ingestion(scenario: dict[str, Any]) -> ScenarioResult:
+    submission = scenario["submission"]
+    lead_store = scenario["lead_store"]
+    expected = scenario["expected"]
+    details: list[str] = []
+
+    matched = next((lead for lead in lead_store if lead.get("lead_id") == submission.get("lead_ref")), None)
+    if matched is None and submission.get("email"):
+        matched = next(
+            (
+                lead for lead in lead_store
+                if lead.get("email") == submission["email"] and lead.get("status") in {"new", "form_sent", "qualified"}
+            ),
+            None,
+        )
+
+    if matched is None:
+        return ScenarioResult(scenario["name"], False, ["Submission could not be matched to an internal lead."])
+
+    normalized = normalize_form_submission(submission)
+    result = evaluate_sale_qualification(normalized)
+    processed = True
+
+    details.append(f"Matched lead: {matched['lead_id']}.")
+    details.append(f"Processed internally: {'yes' if processed else 'no'}.")
+    details.append(f"Qualification rating: {result['qualification_rating']}.")
+
+    passed = (
+        matched["lead_id"] == expected["matched_lead_id"]
+        and processed is expected["processed"]
+        and result["qualification_rating"] == expected["qualification_rating"]
+    )
+    return ScenarioResult(scenario["name"], passed, details)
+
+
 def simulate_slot_proposal(scenario: dict[str, Any]) -> ScenarioResult:
     now = parse_iso(scenario["now"])
     lead = scenario["lead"]
@@ -663,6 +698,26 @@ def simulate_slot_proposal(scenario: dict[str, Any]) -> ScenarioResult:
             if any(slot["start"].startswith(blocked_prefix) for slot in slots):
                 passed = False
 
+    return ScenarioResult(scenario["name"], passed, details)
+
+
+def simulate_calendar_booking_mode(scenario: dict[str, Any]) -> ScenarioResult:
+    connection = scenario["calendar_connection"]
+    expected = scenario["expected"]
+    details: list[str] = []
+
+    if connection.get("primary_available"):
+        calendar_mode = "primary"
+    elif connection.get("fallback_available"):
+        calendar_mode = "fallback"
+    else:
+        calendar_mode = "unavailable"
+
+    details.append(f"Selected calendar mode: {calendar_mode}.")
+    details.append(f"Primary available: {'yes' if connection.get('primary_available') else 'no'}.")
+    details.append(f"Fallback available: {'yes' if connection.get('fallback_available') else 'no'}.")
+
+    passed = calendar_mode == expected["calendar_mode"]
     return ScenarioResult(scenario["name"], passed, details)
 
 
@@ -714,6 +769,26 @@ def simulate_agent_suggestion(scenario: dict[str, Any]) -> ScenarioResult:
     details.append(f"Reason: {expected['reason']}")
 
     passed = slot["start"].startswith(expected["suggested_day_prefix"])
+    return ScenarioResult(scenario["name"], passed, details)
+
+
+def simulate_onboarding_surface(scenario: dict[str, Any]) -> ScenarioResult:
+    setup = scenario["setup"]
+    expected = scenario["expected"]
+    client_uses_daily_tools_only = (
+        setup.get("email_channel") == "agentmail"
+        and setup.get("calendar_connection") == "google_primary"
+        and setup.get("telegram_connected") is True
+        and setup.get("client_backoffice_required") is False
+    )
+
+    details = [
+        f"Email channel: {setup.get('email_channel')}.",
+        f"Calendar connection: {setup.get('calendar_connection')}.",
+        f"Telegram connected: {'yes' if setup.get('telegram_connected') else 'no'}.",
+        f"Client backoffice required: {'yes' if setup.get('client_backoffice_required') else 'no'}.",
+    ]
+    passed = client_uses_daily_tools_only is expected["smooth_onboarding"]
     return ScenarioResult(scenario["name"], passed, details)
 
 
@@ -773,9 +848,12 @@ def simulate_weekly_planning(scenario: dict[str, Any]) -> ScenarioResult:
 SIMULATORS = {
     "inbound_new_lead": simulate_inbound_new_lead,
     "form_submission": simulate_form_submission,
+    "lead_store_ingestion": simulate_lead_store_ingestion,
     "slot_proposal": simulate_slot_proposal,
+    "calendar_booking_mode": simulate_calendar_booking_mode,
     "booking_conflict": simulate_booking_conflict,
     "agent_suggestion": simulate_agent_suggestion,
+    "onboarding_surface": simulate_onboarding_surface,
     "urgent_request": simulate_urgent_request,
     "capacity_guardrail": simulate_capacity_guardrail,
     "weekly_planning": simulate_weekly_planning,
