@@ -98,6 +98,10 @@ Analyser le sujet (`subject`) pour les mots-clés suivants :
 | offre, bod, offer | FR/NL/EN | **offers** |
 | visite, bezoek, visit | FR/NL/EN | **visits** |
 | visiteur souhaite plus d'informations, plus d'informations, immoweb | FR | **visits** |
+| loyer, huur, rent, location | FR/NL/EN | **visits** (avec `listing_type=rental`) |
+| bail, huurcontract, lease | FR/NL/EN | **lease** |
+| état des lieux, plaatsbeschrijving | FR/NL | **lease** |
+| préavis, opzeg | FR/NL | **lease** |
 | PEB, EPC, certificat, attest, certificaat | FR/NL | **dossier** |
 | urbanisme, stedenbouw, commune, gemeente | FR/NL | **dossier** |
 | compromis, notaire, notaris | FR/NL | **closing** |
@@ -122,6 +126,21 @@ Indices suffisants :
 - objet proche de `Un visiteur souhaite plus d'informations`
 - présence de champs `Nom`, `Téléphone`, `Adresse mail`
 - présence d'une adresse de bien ou d'un bloc `Détails de la demande`
+
+Détection type mandat à appliquer juste après la détection Immoweb :
+
+```python
+subject_lower = subject.lower()
+body_lower = body.lower()
+if "louer" in subject_lower or "location" in body_lower or "huur" in body_lower:
+    listing_type = "rental"
+elif "vendre" in subject_lower or "vente" in body_lower or "koop" in body_lower:
+    listing_type = "sale"
+else:
+    listing_type = "unknown"
+```
+
+Passer `listing_type` dans le payload envoyé à `visits`.
 
 **Étape 5 : Fallback — Notification à l'agent**
 
