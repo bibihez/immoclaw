@@ -2,9 +2,10 @@
 name: visits
 description: >
   Manage property visits for a Belgian real-estate agent: parse Immoweb leads,
-  run sale-side pre-qualification by email, propose visit slots from calendar
-  availability, proactively discuss visit timing with the agent on Telegram,
-  book confirmed visits, send agent briefing cards, and follow up for feedback.
+  send a Google Form qualification link, auto-qualify from structured form
+  responses, propose visit slots from calendar availability, proactively discuss
+  visit timing with the agent on Telegram, book confirmed visits, send agent
+  briefing cards, and follow up for feedback.
 user-invocable: true
 metadata:
   author: TreeLaunch
@@ -25,7 +26,7 @@ Use this skill to handle visit logistics for a real-estate agent in Belgium. The
 6. brief the agent before the visit
 7. collect feedback after the visit
 
-Keep the workflow practical. Do not jump directly from an Immoweb lead to a confirmed visit unless the lead has already answered the qualification questions.
+Keep the workflow practical. Do not jump directly from an Immoweb lead to a confirmed visit unless the lead has already completed the qualification form or the agent explicitly overrides that step.
 
 ## OpenClaw Mode
 
@@ -60,7 +61,8 @@ Use this skill when:
 - the agent asks to plan or organize a visit
 - `comms` forwards an email about a property visit
 - `comms` forwards an Immoweb lead from `info@immoweb.be` or `agences@immoweb.be`
-- a reply arrives to a qualification email, a slot proposal, or a post-visit follow-up
+- a new form submission is detected in the `Qualifications` tab of the Pipeline Sheet
+- a reply arrives to a slot proposal or a post-visit follow-up
 
 Typical user phrases:
 
@@ -75,12 +77,13 @@ Minimum useful inputs:
 - `{USER.preferences.working_hours}` such as `09:00-20:00`
 - an inbound email path through `comms` or a forwarding inbox
 - Telegram access through OpenClaw
-- email templates for qualification, slot proposal, and visit feedback
+- `USER.forms.qualification.{fr|nl}_prefill_url_template`
+- email templates for form link, slot proposal, and visit feedback
 
 Optional but useful:
 
 - `{USER.google.pipeline_sheet_id}`
-- access to the Pipeline Sheet tabs `Properties` and `Leads`
+- access to the Pipeline Sheet tabs `Properties`, `Leads`, and `Qualifications`
 - property-level constraints already stored somewhere
 
 Useful optional preferences:
@@ -95,7 +98,7 @@ Gmail direct access is not mandatory if `comms` or a forwarding inbox already pr
 ## Operating Rules
 
 - Prefer email for first contact with Immoweb leads unless the workflow explicitly allows phone or WhatsApp.
-- Treat an Immoweb lead as `new` until pre-qualification answers are received.
+- Treat an Immoweb lead as `new` until the form-link email is sent, then `form_sent` until a form submission is received.
 - Only propose slots when the lead is `qualified` or the agent explicitly overrides this.
 - Always check the current calendar immediately before offering or booking a slot.
 - Default visit duration is `45 min`.
@@ -114,8 +117,8 @@ Gmail direct access is not mandatory if `comms` or a forwarding inbox already pr
 Use these statuses in the `Leads` sheet or any minimal tracking store:
 
 - `new`: lead created, not yet contacted
-- `awaiting_qualification`: qualification email sent
-- `qualified`: lead answered and is worth scheduling
+- `form_sent`: Google Form link sent, waiting for the lead to complete it
+- `qualified`: form received and lead is worth scheduling
 - `visit_proposed`: slots sent, waiting for selection
 - `visit_scheduled`: visit booked in calendar
 - `visited`: visit completed
@@ -138,7 +141,7 @@ Use this derived rating in notes, Telegram summaries, and decision logic:
 The rating does not replace the lead status model. Typical mapping:
 
 - `hot` or `medium` -> lead can still move to `qualified`
-- `weak` -> usually remain in `awaiting_qualification` until clarified
+- `weak` -> usually remain in `form_sent` until clarified or explicit agent review
 - `reject` -> usually move to `closed`
 
 ## Core Flow
@@ -166,52 +169,90 @@ gws sheets spreadsheets.values append --params '{"spreadsheetId": "{USER.google.
 
 If the property match is ambiguous, stop at draft stage and ask the agent to confirm the property.
 
-### 2. Automatic Pre-Qualification
+### 2. Qualification Via Google Forms
 
-This is the main addition to the original flow. For new inbound sale leads, send a qualification email before proposing a visit.
+For new inbound sale leads, send a Google Form link instead of a qualification email. The form is public, mobile-friendly, and linked directly to the Pipeline Sheet tab `Qualifications`.
 
-The qualification email should be short and aimed at operational filtering. Ask only the minimum useful questions:
+**Step 1: Send the form link**
 
-- whether they want to buy to live in the property or invest
-- approximate budget
-- financing status: own funds, mortgage in progress, pre-approved, or not started
-- desired purchase timing
-- what interests them specifically about the property
-- preferred availability windows for a visit
+After intake creates the lead row:
 
-Output goes to `comms` for an approval or auto-send flow, depending on the environment.
+1. choose the FR or NL prefill URL template from `USER.forms.qualification`
+2. generate the lead-specific form URL by injecting `{lead_id}` into the stored prefill URL template; the Google Form must expose a required lead reference field prefilled with that value
+3. draft the email with `email-lead-form-{lang}.md`
+4. send it through `comms` for the always-approve flow
+5. update the lead status to `form_sent`
 
-After sending:
+The email should stay short: thank the lead, mention the property address, link to the form, and promise a follow-up within 24 hours.
 
-- update lead status to `awaiting_qualification`
-- store the send date if the sheet supports it
+**Step 2: Detect new form submissions**
 
-When a reply arrives:
+Every 10 minutes between `08:00` and `22:00`, read the `Qualifications` tab:
 
-1. summarize the answers
-2. compute a qualification rating: `hot`, `medium`, `weak`, or `reject`
-3. note the main red flags, budget signal, and financing signal
-4. update the sheet, CRM, or working memory with the summary
-5. move the lead to `qualified`, keep it in `awaiting_qualification`, or move it to `closed`
+```bash
+gws sheets spreadsheets.values get --params '{"spreadsheetId": "{USER.google.pipeline_sheet_id}", "range": "Qualifications!A:M"}'
+```
 
-Qualification should stay permissive. The goal is not strict rejection; it is to avoid wasting visit slots on clearly unready leads.
+Filter for rows where column `M` (`Processed`) is empty.
 
-Red flags to watch for:
+For each new submission:
 
-- explicitly curious wording such as `je suis juste curieux`
-- no budget disclosed after qualification
-- budget clearly below property level
-- financing not started or unrealistic for the price level
-- vague or inconsistent motivation
-- pressure to visit immediately without basic seriousness
-- silence after qualification questions
+1. match the row to the lead using `Lead Ref` (column `B`) first
+2. if `Lead Ref` is missing or edited, fallback to email + latest open lead and flag manual review if still ambiguous
+3. normalize the form answers to internal values:
+   - `purpose`: `live_in`, `invest`, `both`
+   - `financing_status`: `own_funds`, `pre_approved`, `in_progress`, `not_started`
+   - `timing`: `lt_1_month`, `1_3_months`, `3_6_months`, `no_rush`
+   - `preferred_days`: comma-separated day-part codes such as `tue_pm,thu_am`
+4. convert the budget band to a numeric proxy before running the qualification logic
+5. compute the rating: `hot`, `medium`, `weak`, or `reject`
+6. write the rating to `Qualifications!L`
+7. write `Y` to `Qualifications!M`
+8. update the lead row:
+   - `hot` / `medium` -> `qualified`
+   - `weak` -> keep `form_sent`, notify the agent for a manual decision
+   - `reject` -> `closed`
 
-Recommended rating logic:
+Qualification should stay permissive. The objective is still operational filtering, not strict rejection.
 
-- `hot`: coherent budget, credible financing, clear timing, good reason to visit
-- `medium`: one major unknown remains, but the lead still looks serious
-- `weak`: several unknowns remain, or silence weakens confidence
-- `reject`: budget is unrealistic, financing path is absent, or motivation is clearly not serious
+Red flags to compute:
+
+- `budget_missing`
+- `budget_below_property_level`
+- `financing_unclear_or_missing`
+- `motivation_unclear`
+- `curious_only`
+- `purchase_purpose_unclear`
+- `timing_unclear`
+
+**Step 3: Notify the agent**
+
+For qualified leads (`hot` or `medium`):
+
+```text
+[{adresse}] Formulaire reçu : {lead_name}
+Rating: HOT | Budget: 300-400k | Prêt: accord de principe
+Timing: 1-3 mois | Dispo: mardi après-midi, jeudi matin
+Red flags: aucun
+→ Proposition de créneau ? (ok / ignorer)
+```
+
+For weak leads:
+
+```text
+[{adresse}] Formulaire reçu : {lead_name}
+Rating: WEAK | Budget: non précisé | Financement: pas démarré
+Red flags: budget_missing, financing_unclear_or_missing
+→ Contacter quand même ? (ok / ignorer)
+```
+
+For rejects:
+
+```text
+[{adresse}] Formulaire reçu : {lead_name}
+Rating: REJECT — curieux uniquement ou budget incohérent.
+Lead fermé automatiquement.
+```
 
 ### 3. Slot Proposal
 
@@ -223,7 +264,7 @@ Run this only for `qualified` leads, or when the agent explicitly says to skip q
 gws calendar events list --params '{"calendarId": "{USER.google.calendar_id}", "timeMin": "{date_demain_iso}", "timeMax": "{date_plus_7j_iso}"}'
 ```
 
-2. Generate 2 to 3 realistic visit options inside working hours.
+2. Generate 2 to 3 realistic visit options inside working hours. When the qualification form includes `preferred_days`, filter the generated slots to those day-parts first and only fall back to the default logic if no valid slot remains.
 3. Prefer grouped tours when several qualified leads exist in the same area.
 4. Rank slots in this order:
    - actual calendar constraints and conflicts
@@ -390,7 +431,7 @@ When the skill reasons about a lead or a proposed visit, prefer these compact ou
 
 ### Draft Lead Email
 
-- Qualification email
+- Form link email
 - Slot proposal email
 - Confirmation email
 - Cancellation or reschedule email
@@ -471,7 +512,7 @@ Prefer fixed 30-minute slots and avoid overbooking.
 - Calendar conflict or double booking: regenerate slots instead of forcing a booking.
 - Property visitor capacity reached: surface the limit and ask the agent for the next decision.
 - Agent slow to answer: do not auto-confirm; send a short reminder on Telegram.
-- Lead silent after qualification: downgrade confidence and nudge the agent if the lead was otherwise promising.
+- Lead never fills the form: if a lead stays `form_sent` for more than 48h, notify the agent on Telegram: `Relancer ou fermer ?` / `Opnieuw contacteren of sluiten?`
 - Lead silent after slot proposal: keep the thread open, but do not over-commit or spam follow-ups unless instructed.
 - Property under option, sold, or unavailable: stop scheduling and notify the agent.
 - Urgent next-day request with uncertain availability: escalate to the agent, do not auto-commit.

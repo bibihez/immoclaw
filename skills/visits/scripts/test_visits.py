@@ -2,6 +2,8 @@
 
 import argparse
 import json
+import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,6 +27,137 @@ BRUSSELS_ZONES = {
     "bruxelles": "center",
 }
 
+CANONICAL_DAY_NAMES = {
+    "monday": "mon",
+    "tuesday": "tue",
+    "wednesday": "wed",
+    "thursday": "thu",
+    "friday": "fri",
+    "saturday": "sat",
+    "sunday": "sun",
+}
+
+DAY_NAME_ALIASES = {
+    "mon": "mon",
+    "monday": "mon",
+    "lundi": "mon",
+    "maandag": "mon",
+    "tue": "tue",
+    "tuesday": "tue",
+    "mardi": "tue",
+    "dinsdag": "tue",
+    "wed": "wed",
+    "wednesday": "wed",
+    "mercredi": "wed",
+    "woensdag": "wed",
+    "thu": "thu",
+    "thursday": "thu",
+    "jeudi": "thu",
+    "donderdag": "thu",
+    "fri": "fri",
+    "friday": "fri",
+    "vendredi": "fri",
+    "vrijdag": "fri",
+    "sat": "sat",
+    "saturday": "sat",
+    "samedi": "sat",
+    "zaterdag": "sat",
+    "sun": "sun",
+    "sunday": "sun",
+    "dimanche": "sun",
+    "zondag": "sun",
+}
+
+DAY_PART_ALIASES = {
+    "morning": "am",
+    "matin": "am",
+    "voormiddag": "am",
+    "afternoon": "pm",
+    "apres midi": "pm",
+    "apres-midi": "pm",
+    "apresmidi": "pm",
+    "namiddag": "pm",
+}
+
+PURPOSE_ALIASES = {
+    "live in": "live_in",
+    "live_in": "live_in",
+    "habiter": "live_in",
+    "wonen": "live_in",
+    "invest": "invest",
+    "investir": "invest",
+    "investeren": "invest",
+    "both": "both",
+    "les deux": "both",
+    "beide": "both",
+}
+
+FINANCING_ALIASES = {
+    "own funds": "own_funds",
+    "own_funds": "own_funds",
+    "fonds propres": "own_funds",
+    "eigen middelen": "own_funds",
+    "pre approved": "pre_approved",
+    "pre-approved": "pre_approved",
+    "credit avec accord de principe": "pre_approved",
+    "credit accord de principe": "pre_approved",
+    "lening met principieel akkoord": "pre_approved",
+    "mortgage in progress": "in_progress",
+    "in progress": "in_progress",
+    "in_progress": "in_progress",
+    "credit en cours de demande": "in_progress",
+    "lening in aanvraag": "in_progress",
+    "not started": "not_started",
+    "not_started": "not_started",
+    "pas encore demarre": "not_started",
+    "nog niet gestart": "not_started",
+    "unknown": "",
+    "none": "",
+}
+
+TIMING_ALIASES = {
+    "less than 1 month": "lt_1_month",
+    "within 1 month": "lt_1_month",
+    "lt_1_month": "lt_1_month",
+    "moins d un mois": "lt_1_month",
+    "minder dan een maand": "lt_1_month",
+    "within 3 months": "1_3_months",
+    "1-3 months": "1_3_months",
+    "1_3_months": "1_3_months",
+    "1 a 3 mois": "1_3_months",
+    "1 tot 3 maanden": "1_3_months",
+    "3-6 months": "3_6_months",
+    "3_6_months": "3_6_months",
+    "3 a 6 mois": "3_6_months",
+    "3 tot 6 maanden": "3_6_months",
+    "no rush": "no_rush",
+    "no_rush": "no_rush",
+    "pas de rush": "no_rush",
+    "geen haast": "no_rush",
+    "unknown": "",
+    "someday": "",
+}
+
+BUDGET_BAND_ALIASES = {
+    "< 200 000": 150000,
+    "< 200000": 150000,
+    "<200k": 150000,
+    "under 200k": 150000,
+    "200 000 300 000": 250000,
+    "200000 300000": 250000,
+    "200-300k": 250000,
+    "300 000 400 000": 350000,
+    "300000 400000": 350000,
+    "300-400k": 350000,
+    "400 000 500 000": 450000,
+    "400000 500000": 450000,
+    "400-500k": 450000,
+    "500 000": 500000,
+    "500000": 500000,
+    "500k": 500000,
+    "500k+": 500000,
+}
+
 
 @dataclass
 class ScenarioResult:
@@ -45,6 +178,15 @@ def fmt_dt(value: datetime) -> str:
 def parse_hhmm(value: str) -> tuple[int, int]:
     hours, minutes = value.split(":")
     return int(hours), int(minutes)
+
+
+def fold_text(value: Any) -> str:
+    if value is None:
+        return ""
+    normalized = unicodedata.normalize("NFKD", str(value))
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    collapsed = re.sub(r"[\s_/]+", " ", ascii_only.replace("–", "-").replace("—", "-").strip().lower())
+    return re.sub(r"\s+", " ", collapsed)
 
 
 def day_bounds(day: datetime, working_hours: tuple[str, str]) -> tuple[datetime, datetime]:
@@ -114,10 +256,13 @@ def append_candidate_slot(
     target_commune: str,
     buffer_minutes: int,
     seen_starts: set[str],
+    preferred_day_parts: Optional[set[str]] = None,
 ) -> bool:
     slot_end = slot_start + timedelta(minutes=visit_minutes)
     key = fmt_dt(slot_start)
     if key in seen_starts:
+        return False
+    if preferred_day_parts and slot_day_part_code(slot_start) not in preferred_day_parts:
         return False
     if not slot_is_free(slot_start, slot_end, calendar_events, target_commune, buffer_minutes):
         return False
@@ -135,12 +280,71 @@ def parse_budget(value: Any) -> Optional[int]:
     return int(digits) if digits else None
 
 
+def normalize_budget_band(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    folded = fold_text(value).replace("eur", "").replace("euro", "")
+    collapsed = re.sub(r"[^0-9k+< ]+", " ", folded)
+    collapsed = re.sub(r"\s+", " ", collapsed).strip()
+    if collapsed in BUDGET_BAND_ALIASES:
+        return BUDGET_BAND_ALIASES[collapsed]
+    parsed = parse_budget(value)
+    return parsed if parsed is not None and parsed >= 100000 else parsed
+
+
+def normalize_lookup(value: Any, aliases: dict[str, str]) -> str:
+    folded = fold_text(value)
+    return aliases.get(folded, folded.replace(" ", "_"))
+
+
+def normalize_preferred_days(value: Any) -> list[str]:
+    if value in {None, ""}:
+        return []
+    items = value if isinstance(value, list) else re.split(r"[,\n;]+", str(value))
+    normalized: list[str] = []
+
+    for item in items:
+        folded = fold_text(item)
+        if not folded:
+            continue
+        direct = folded.replace("-", "_").replace(" ", "_")
+        if re.fullmatch(r"(mon|tue|wed|thu|fri|sat|sun)_(am|pm)", direct):
+            code = direct
+        else:
+            day = next((code for alias, code in DAY_NAME_ALIASES.items() if alias in folded.split()), "")
+            if not day:
+                day = next((code for alias, code in DAY_NAME_ALIASES.items() if alias in folded), "")
+            part = next((code for alias, code in DAY_PART_ALIASES.items() if alias in folded), "")
+            code = f"{day}_{part}" if day and part else ""
+        if code and code not in normalized:
+            normalized.append(code)
+
+    return normalized
+
+
+def normalize_form_submission(reply: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(reply)
+    normalized["purchase_purpose"] = normalize_lookup(reply.get("purchase_purpose", ""), PURPOSE_ALIASES)
+    normalized["financing_status"] = normalize_lookup(reply.get("financing_status", ""), FINANCING_ALIASES)
+    normalized["project_timing"] = normalize_lookup(reply.get("project_timing", ""), TIMING_ALIASES)
+    normalized["budget"] = normalize_budget_band(reply.get("budget"))
+    normalized["preferred_days"] = normalize_preferred_days(reply.get("preferred_days") or reply.get("availability"))
+    normalized["interest_reason"] = str(reply.get("interest_reason", "")).strip()
+    return normalized
+
+
+def slot_day_part_code(slot_start: datetime) -> str:
+    day_code = list(CANONICAL_DAY_NAMES.values())[slot_start.weekday()]
+    part_code = "am" if slot_start.hour < 12 else "pm"
+    return f"{day_code}_{part_code}"
+
+
 def evaluate_sale_qualification(reply: dict[str, Any]) -> dict[str, Any]:
     financing = reply.get("financing_status", "").strip().lower()
     timing = reply.get("project_timing", "").strip().lower()
     motivation = reply.get("interest_reason", "").strip().lower()
     purpose = reply.get("purchase_purpose", "").strip().lower()
-    budget = parse_budget(reply.get("budget"))
+    budget = normalize_budget_band(reply.get("budget"))
     property_price = parse_budget(reply.get("property_price"))
     silence_days = int(reply.get("days_silent_after_qualification", 0))
 
@@ -150,7 +354,7 @@ def evaluate_sale_qualification(reply: dict[str, Any]) -> dict[str, Any]:
         red_flags.append("budget_missing")
     if budget and property_price and budget < int(property_price * 0.85):
         red_flags.append("budget_below_property_level")
-    if financing in {"", "not started", "unknown", "none"}:
+    if financing in {"", "not_started", "unknown", "none"}:
         red_flags.append("financing_unclear_or_missing")
     if not motivation:
         red_flags.append("motivation_unclear")
@@ -163,18 +367,18 @@ def evaluate_sale_qualification(reply: dict[str, Any]) -> dict[str, Any]:
     if silence_days >= 3:
         red_flags.append("silent_after_qualification")
 
-    financing_credible = financing in {"pre-approved", "mortgage in progress", "own funds"}
+    financing_credible = financing in {"pre_approved", "in_progress", "own_funds"}
     budget_coherent = budget is not None and (property_price is None or budget >= int(property_price * 0.85))
     motivation_clear = bool(motivation) and "curieux" not in motivation and "curious" not in motivation
     timing_clear = timing not in {"", "unknown", "someday"}
 
     if "curious_only" in red_flags or "budget_below_property_level" in red_flags or (
-        financing in {"", "not started", "unknown", "none"} and not motivation_clear
+        financing in {"", "not_started", "unknown", "none"} and not motivation_clear
     ):
         rating = "reject"
-    elif financing_credible and budget_coherent and motivation_clear and timing_clear:
+    elif financing in {"pre_approved", "own_funds"} and budget_coherent and motivation_clear and timing_clear:
         rating = "hot"
-    elif len(red_flags) <= 2 and motivation_clear:
+    elif len(red_flags) <= 1 and motivation_clear and financing not in {"", "not_started", "unknown", "none"}:
         rating = "medium"
     else:
         rating = "weak"
@@ -182,7 +386,7 @@ def evaluate_sale_qualification(reply: dict[str, Any]) -> dict[str, Any]:
     if rating in {"hot", "medium"}:
         lead_status = "qualified"
     elif rating == "weak":
-        lead_status = "awaiting_qualification"
+        lead_status = "form_sent"
     else:
         lead_status = "closed"
 
@@ -206,6 +410,41 @@ def generate_slots(
     required_count: int = 3,
     visit_minutes: int = DEFAULT_VISIT_MINUTES,
     buffer_minutes: int = DEFAULT_TRAVEL_BUFFER_MINUTES,
+    preferred_day_parts: Optional[set[str]] = None,
+) -> list[dict[str, str]]:
+    slots = _generate_slots(
+        now,
+        calendar_events,
+        working_hours,
+        target_commune,
+        required_count,
+        visit_minutes,
+        buffer_minutes,
+        preferred_day_parts,
+    )
+    if slots or not preferred_day_parts:
+        return slots
+    return _generate_slots(
+        now,
+        calendar_events,
+        working_hours,
+        target_commune,
+        required_count,
+        visit_minutes,
+        buffer_minutes,
+        None,
+    )
+
+
+def _generate_slots(
+    now: datetime,
+    calendar_events: list[dict[str, Any]],
+    working_hours: tuple[str, str],
+    target_commune: str,
+    required_count: int,
+    visit_minutes: int,
+    buffer_minutes: int,
+    preferred_day_parts: Optional[set[str]],
 ) -> list[dict[str, str]]:
     slots: list[dict[str, str]] = []
     events = sorted(calendar_events, key=lambda item: item["start"])
@@ -234,6 +473,7 @@ def generate_slots(
                 target_commune,
                 buffer_minutes,
                 seen_starts,
+                preferred_day_parts,
             )
             if len(slots) >= required_count:
                 return slots
@@ -264,6 +504,7 @@ def generate_slots(
                 target_commune,
                 buffer_minutes,
                 seen_starts,
+                preferred_day_parts,
             )
             cursor = candidate_end + timedelta(minutes=buffer_minutes)
 
@@ -279,6 +520,7 @@ def generate_slots(
                     target_commune,
                     buffer_minutes,
                     seen_starts,
+                    preferred_day_parts,
                 )
             early_cursor = early_cursor + timedelta(minutes=15)
 
@@ -366,18 +608,28 @@ def simulate_inbound_new_lead(scenario: dict[str, Any]) -> ScenarioResult:
     return ScenarioResult(scenario["name"], passed, details)
 
 
-def simulate_qualification_reply(scenario: dict[str, Any]) -> ScenarioResult:
+def simulate_form_submission(scenario: dict[str, Any]) -> ScenarioResult:
     reply = scenario["reply"]
     expected = scenario["expected"]
     details: list[str] = []
 
-    result = evaluate_sale_qualification(reply)
+    normalized = normalize_form_submission(reply)
+    result = evaluate_sale_qualification(normalized)
     status = result["lead_status"]
     rating = result["qualification_rating"]
 
     passed = status == expected["lead_status"] and rating == expected["qualification_rating"]
+    for key, value in expected.get("normalized", {}).items():
+        if normalized.get(key) != value:
+            passed = False
+            details.append(f"Normalized {key}: expected {value}, got {normalized.get(key)}.")
     details.append(f"Qualification outcome: {status}.")
     details.append(f"Qualification rating: {rating}.")
+    details.append(
+        "Normalized form: "
+        f"purpose={normalized['purchase_purpose']}, financing={normalized['financing_status']}, "
+        f"timing={normalized['project_timing']}, preferred_days={','.join(normalized['preferred_days']) or 'none'}."
+    )
     details.append(f"Budget signal: {result['budget_signal']}.")
     details.append(f"Financing signal: {result['financing_signal']}.")
     if result["red_flags"]:
@@ -392,8 +644,9 @@ def simulate_slot_proposal(scenario: dict[str, Any]) -> ScenarioResult:
     calendar_events = scenario["calendar_events"]
     working_hours = tuple(scenario.get("working_hours", DEFAULT_WORKING_HOURS))
     expected = scenario["expected"]
+    preferred_day_parts = set(normalize_preferred_days(lead.get("preferred_days")))
 
-    slots = generate_slots(now, calendar_events, working_hours, lead["commune"])
+    slots = generate_slots(now, calendar_events, working_hours, lead["commune"], preferred_day_parts=preferred_day_parts)
     details = [f"Generated {len(slots)} slots."]
     passed = len(slots) >= expected["minimum_slots"]
 
@@ -401,6 +654,11 @@ def simulate_slot_proposal(scenario: dict[str, Any]) -> ScenarioResult:
         details.extend([f"Slot {index + 1}: {slot['start']} -> {slot['end']}" for index, slot in enumerate(slots)])
         if "first_slot_prefix" in expected:
             passed = passed and slots[0]["start"].startswith(expected["first_slot_prefix"])
+        if "only_day_prefix" in expected:
+            passed = passed and all(slot["start"].startswith(expected["only_day_prefix"]) for slot in slots)
+        for allowed_prefix in expected.get("allowed_prefixes", []):
+            if not any(slot["start"].startswith(allowed_prefix) for slot in slots):
+                passed = False
         for blocked_prefix in expected.get("blocked_prefixes", []):
             if any(slot["start"].startswith(blocked_prefix) for slot in slots):
                 passed = False
@@ -514,7 +772,7 @@ def simulate_weekly_planning(scenario: dict[str, Any]) -> ScenarioResult:
 
 SIMULATORS = {
     "inbound_new_lead": simulate_inbound_new_lead,
-    "qualification_reply": simulate_qualification_reply,
+    "form_submission": simulate_form_submission,
     "slot_proposal": simulate_slot_proposal,
     "booking_conflict": simulate_booking_conflict,
     "agent_suggestion": simulate_agent_suggestion,

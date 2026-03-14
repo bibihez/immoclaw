@@ -14,33 +14,63 @@
       }
     },
     {
-      "name": "Qualified sale reply becomes qualified and hot",
-      "type": "qualification_reply",
+      "name": "French Google Form submission becomes qualified and hot",
+      "type": "form_submission",
       "reply": {
-        "purchase_purpose": "live in",
-        "budget": "485000",
-        "property_price": "495000",
-        "financing_status": "pre-approved",
-        "project_timing": "within 3 months",
-        "interest_reason": "We like the garden and the layout for our family",
-        "availability": "weekday afternoons"
+        "purchase_purpose": "Habiter",
+        "budget": "300.000 - 400.000 EUR",
+        "property_price": "350000",
+        "financing_status": "Credit avec accord de principe",
+        "project_timing": "1 a 3 mois",
+        "interest_reason": "Nous aimons le jardin et la disposition pour notre famille",
+        "preferred_days": "Mardi apres-midi, Jeudi matin"
       },
       "expected": {
         "lead_status": "qualified",
-        "qualification_rating": "hot"
+        "qualification_rating": "hot",
+        "normalized": {
+          "purchase_purpose": "live_in",
+          "budget": 350000,
+          "financing_status": "pre_approved",
+          "project_timing": "1_3_months",
+          "preferred_days": ["tue_pm", "thu_am"]
+        }
       }
     },
     {
-      "name": "Unclear budget and no financing path stays weak or closed",
-      "type": "qualification_reply",
+      "name": "Dutch Google Form submission with unclear financing stays form_sent",
+      "type": "form_submission",
+      "reply": {
+        "purchase_purpose": "Wonen",
+        "budget": "400.000 - 500.000 EUR",
+        "property_price": "495000",
+        "financing_status": "Nog niet gestart",
+        "project_timing": "Geen haast",
+        "interest_reason": "Wij vergelijken nog enkele panden maar dit huis past wel bij onze criteria",
+        "preferred_days": "Donderdag namiddag"
+      },
+      "expected": {
+        "lead_status": "form_sent",
+        "qualification_rating": "weak",
+        "normalized": {
+          "purchase_purpose": "live_in",
+          "budget": 450000,
+          "financing_status": "not_started",
+          "project_timing": "no_rush",
+          "preferred_days": ["thu_pm"]
+        }
+      }
+    },
+    {
+      "name": "Curious-only Google Form submission is rejected",
+      "type": "form_submission",
       "reply": {
         "purchase_purpose": "",
         "budget": "",
         "property_price": "495000",
-        "financing_status": "not started",
-        "project_timing": "unknown",
-        "interest_reason": "I am mostly curious to see the house",
-        "days_silent_after_qualification": 4
+        "financing_status": "Pas encore demarre",
+        "project_timing": "",
+        "interest_reason": "Je suis surtout curieux de voir la maison"
       },
       "expected": {
         "lead_status": "closed",
@@ -115,6 +145,22 @@
       "expected": {
         "minimum_slots": 3,
         "blocked_prefixes": ["2026-03-12T13:00", "2026-03-12T13:15", "2026-03-12T13:30", "2026-03-12T13:45"]
+      }
+    },
+    {
+      "name": "Preferred day-parts keep proposals on the requested afternoon",
+      "type": "slot_proposal",
+      "now": "2026-03-11T10:00:00+01:00",
+      "working_hours": ["09:00", "18:00"],
+      "lead": {
+        "commune": "Ixelles",
+        "preferred_days": "Jeudi apres-midi"
+      },
+      "calendar_events": [],
+      "expected": {
+        "minimum_slots": 3,
+        "first_slot_prefix": "2026-03-12T13:00",
+        "only_day_prefix": "2026-03-12"
       }
     },
     {

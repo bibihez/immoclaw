@@ -41,12 +41,30 @@
 | F | Budget | number | Budget déclaré (EUR) |
 | G | Financing | string | Cash / Loan / Loan with pre-approval |
 | H | Pre-approved | string | Y / N |
-| I | Status | string | new / qualified / visit_scheduled / visited / offer_made / rejected |
+| I | Status | string | new / form_sent / qualified / visit_proposed / visit_scheduled / visited / feedback_received / closed |
 | J | Visit Date | date | Date de visite (planifiée ou effectuée) |
 | K | Feedback | string | Résumé du feedback post-visite |
 | L | Offer Amount | number | Montant de l'offre si faite (EUR) |
 | M | Notes | string | Texte libre |
 | N | Created | date | Date d'ajout |
+
+## Tab "Qualifications"
+
+| Col | Header | Type | Description |
+|-----|--------|------|-------------|
+| A | Timestamp | date | Horodatage automatique de Google Forms |
+| B | Lead Ref | string | Lead ID prérempli dans le lien du formulaire |
+| C | Lead Name | string | Nom complet |
+| D | Email | string | Email |
+| E | Phone | string | Téléphone |
+| F | Purpose | string | live_in / invest / both après normalisation |
+| G | Budget Range | string | Bande budgétaire Google Forms |
+| H | Financing Status | string | own_funds / pre_approved / in_progress / not_started après normalisation |
+| I | Timing | string | lt_1_month / 1_3_months / 3_6_months / no_rush après normalisation |
+| J | Motivation | string | Motivation libre du lead |
+| K | Preferred Visit Days | string | Codes de disponibilité, ex. `tue_pm,thu_am` |
+| L | Qualification Rating | string | hot / medium / weak / reject |
+| M | Processed | string | Y quand la qualification a été traitée |
 
 ## Tab "Tasks"
 
@@ -62,6 +80,8 @@
 ## Notes d'implémentation
 
 - **Property ID** : Utiliser un UUID court (8 caractères) généré à l'intake
+- **Lead statuses** : `new`, `form_sent`, `qualified`, `visit_proposed`, `visit_scheduled`, `visited`, `feedback_received`, `closed`
+- **Google Forms** : créer 2 formulaires publics (FR et NL) reliés à ce spreadsheet; stocker l'URL préremplie avec `{lead_id}` dans `USER.md`
 - **Docs Detail** (col N) : JSON compressé, ex: `{"ru":"RECEIVED","peb":"IN_PROGRESS","elec":"NOT_STARTED"}`
 - **Status** : Valeurs possibles: `INTAKE`, `ACTIF`, `SOUS_OFFRE`, `COMPROMIS`, `VENDU` (see state-machine.md)
 - **Track states** : Les tracks individuels (Documents, Marketing, Visites, etc.) sont gérés dans Docs Detail et les colonnes dédiées, pas dans le Status global

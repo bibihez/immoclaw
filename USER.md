@@ -16,6 +16,11 @@ google:
   pipeline_sheet_id: ""
   drive_root_folder_id: ""
 
+forms:
+  qualification:
+    fr_prefill_url_template: ""  # Google Forms prefill URL with {lead_id}
+    nl_prefill_url_template: ""  # Google Forms prefill URL with {lead_id}
+
 preferences:
   working_hours: "08:00-19:00"
   working_days: "mon-sat"

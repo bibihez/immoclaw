@@ -108,6 +108,11 @@ google:
   pipeline_sheet_id: ""
   drive_root_folder_id: ""
 
+forms:
+  qualification:
+    fr_prefill_url_template: ""   # Google Forms prefill URL with {lead_id}
+    nl_prefill_url_template: ""   # Google Forms prefill URL with {lead_id}
+
 preferences:
   working_hours: "08:00-19:00"
   working_days: "mon-sat"
@@ -300,6 +305,8 @@ Wallonia (1300-1499, 4000-7999):
 4. If no match: semantic analysis of email body
 5. If still ambiguous: notify agent on Telegram with summary, ask for routing
 
+**Routing note**: `qualification_reply` is removed from the email contract. Lead qualification now happens from Google Forms responses written to the `Qualifications` tab and processed inside `visits`.
+
 **Outbound email flow (always-approve)**:
 
 1. Skill generates email content using template + property/contact data
@@ -320,7 +327,7 @@ Wallonia (1300-1499, 4000-7999):
    - Agent types edits → AI updates draft, re-sends preview
    - "annuler" / "cancel" → AI deletes draft
 
-**Cron backup**: Poll Gmail every 15min for unprocessed emails (Gmail Pub/Sub reliability fallback)
+**Cron backup**: Sweep Gmail every 2h between `08:00` and `22:00` for unprocessed emails (Gmail Pub/Sub reliability fallback)
 
 ### 4.4 `pipeline` — Portfolio Management
 
@@ -366,12 +373,30 @@ Wallonia (1300-1499, 4000-7999):
 | F | Budget | Stated budget |
 | G | Financing | Cash / Loan / Loan with pre-approval |
 | H | Pre-approved | Y/N |
-| I | Status | new / qualified / visit_scheduled / visited / offer_made / rejected |
+| I | Status | new / form_sent / qualified / visit_proposed / visit_scheduled / visited / feedback_received / closed |
 | J | Visit Date | Scheduled or completed |
 | K | Feedback | Post-visit feedback summary |
 | L | Offer Amount | If offer made |
 | M | Notes | Free text |
 | N | Created | Date added |
+
+**Tab "Qualifications"**:
+
+| Col | Header | Content |
+|-----|--------|---------|
+| A | Timestamp | Google Forms response timestamp |
+| B | Lead Ref | Prefilled lead ID |
+| C | Lead Name | Full name |
+| D | Email | Email |
+| E | Phone | Phone |
+| F | Purpose | live_in / invest / both after normalization |
+| G | Budget Range | Google Forms budget band |
+| H | Financing Status | own_funds / pre_approved / in_progress / not_started |
+| I | Timing | lt_1_month / 1_3_months / 3_6_months / no_rush |
+| J | Motivation | Free text |
+| K | Preferred Visit Days | Codes such as `tue_pm,thu_am` |
+| L | Qualification Rating | hot / medium / weak / reject |
+| M | Processed | Y when the response has been handled |
 
 **Tab "Tasks"**:
 
@@ -397,18 +422,21 @@ Wallonia (1300-1499, 4000-7999):
 
 ### 4.5 `visits` — Visit Scheduling
 
-**Trigger**: "planifier visite" / "bezoek plannen" or when a lead is qualified
+**Trigger**: "planifier visite" / "bezoek plannen", when a new Immoweb lead arrives, or when a lead is qualified
 
 **Flow**:
 
-1. **Check availability**: Read agent's Google Calendar via `gws calendar events list`
-2. **Propose slots**: Draft email to buyer with 3 available time slots
-3. **Send for approval**: Preview on Telegram → agent approves
-4. **On buyer confirmation** (caught by `comms` skill → routed here):
+1. **Lead intake**: Parse the Immoweb email forwarded by `comms`, match the property, create the lead row, set status = `new`
+2. **Send form link**: Draft email to buyer with the FR or NL Google Form prefill link and send it for Telegram approval
+3. **Auto-qualification**: Every 10 min from `08:00` to `22:00`, read new rows from `Qualifications`, normalize answers, rate the lead, and notify the agent
+4. **Check availability**: For `hot` or `medium` leads only, read the agent's Google Calendar via `gws calendar events list`
+5. **Propose slots**: Generate 2-3 slots matching the lead's preferred day-parts when provided
+6. **Send for approval**: Preview on Telegram → agent approves
+7. **On buyer confirmation** (caught by `comms` skill → routed here):
    - Create Calendar event: `[Visite] Rue de la Loi 16 - Marie Martin`
    - Update Leads sheet: status = `visit_scheduled`, visit_date = date
    - Confirm to agent on Telegram
-5. **J-1 at 18h** (cron): Send agent a briefing card on Telegram:
+8. **J-1 at 18h** (cron): Send agent a briefing card on Telegram:
    ```
    VISITE DEMAIN 14h - Rue de la Loi 16
 
@@ -422,8 +450,8 @@ Wallonia (1300-1499, 4000-7999):
 
    Comparables recents: 320-360k dans le quartier
    ```
-6. **Visit+2h** (cron): Draft feedback email to buyer ("Qu'avez-vous pense de la visite?")
-7. **On feedback** (via `comms`): Summarize and notify agent on Telegram, update Leads sheet
+9. **Visit+2h** (cron): Draft feedback email to buyer ("Qu'avez-vous pense de la visite?")
+10. **On feedback** (via `comms`): Summarize and notify agent on Telegram, update Leads sheet
 
 **Batch visits** ("journee portes ouvertes"):
 - Agent says: "Open door Saturday, 30min slots, 10h-17h"
@@ -774,7 +802,8 @@ Used for:
 | Doc expiration check | Monthly | `dossier` | Check all active listings |
 | Market watch | Daily 7h | `prospecting` | Scan Immoweb, 2ememain for opportunities |
 | Mandate expiration | J-30, J-14, J-7 | `pipeline` | Alert agent to renew mandate |
-| Gmail fallback poll | Every 15min | `comms` | Backup poll for missed Pub/Sub events |
+| Gmail fallback poll | Every 2h (`08:00`-`22:00`) | `comms` | Backup sweep for missed Pub/Sub events |
+| Qualification sweep | Every 10min (`08:00`-`22:00`) | `visits` | Read new Google Forms rows from `Qualifications`, rate leads, notify agent |
 
 ---
 

@@ -128,6 +128,20 @@ I: Status | J: Visit Date | K: Feedback | L: Offer Amount
 M: Notes | N: Created
 ```
 
+Statuts lead attendus :
+```
+new, form_sent, qualified, visit_proposed, visit_scheduled, visited, feedback_received, closed
+```
+
+### Colonnes Qualifications (A-M)
+
+```
+A: Timestamp | B: Lead Ref | C: Lead Name | D: Email | E: Phone
+F: Purpose | G: Budget Range | H: Financing Status
+I: Timing | J: Motivation | K: Preferred Visit Days
+L: Qualification Rating | M: Processed
+```
+
 ### Colonnes Tasks (A-F)
 
 ```
@@ -212,6 +226,9 @@ Placeholders communs :
 {signature}               — Bloc signature complet (USER.signature.{lang})
 {drive_folder_url}        — URL du dossier Drive
 {pipeline_sheet_id}       — ID du Google Sheet
+{lead_id}                 — Identifiant lead prérempli dans Google Forms
+{lead_ref}                — Référence lead stockée en tab `Qualifications`
+{form_url}                — URL Google Forms préremplie pour ce lead
 {date_iso}                — Date ISO 8601 (YYYY-MM-DD)
 {destinataire}            — Email du destinataire
 {sujet}                   — Sujet de l'email

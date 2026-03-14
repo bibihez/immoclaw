@@ -30,7 +30,7 @@ Pour les leads Immoweb, `comms` doit détecter les nouveaux leads très tôt et 
 | Source | Signal | Action |
 |--------|--------|--------|
 | Gmail Pub/Sub | Nouveau message reçu | Classifier et router |
-| Cron 15min | Polling fallback | Récupérer les messages non traités |
+| Sweep 2h (08:00-22:00) | Polling fallback | Récupérer les messages non traités |
 | Agent Telegram | "check email", "mail ?", "nieuwe mail ?" | Forcer un check immédiat |
 
 Trigger phrases exactes :
@@ -53,7 +53,7 @@ Trigger phrases exactes :
 ## 3. Prérequis
 
 - `gws auth` configuré avec scopes Gmail, Sheets, Drive
-- Gmail Pub/Sub watch actif (ou cron 15min comme fallback)
+- Gmail Pub/Sub watch actif (ou sweep 2h de `08:00` à `22:00` comme fallback)
 - Pipeline sheet accessible : `{pipeline_sheet_id}`
 - Tab `Leads` lisible pour le lookup des contacts connus
 - Tab `Properties` lisible pour le lookup des vendeurs et biens
@@ -63,7 +63,7 @@ Trigger phrases exactes :
 
 ### 4.1 Inbound — Réception et classification
 
-Déclenché par Gmail Pub/Sub ou cron 15min.
+Déclenché par Gmail Pub/Sub, par sweep de réconciliation toutes les 2 heures entre `08:00` et `22:00`, ou à la demande de l'agent.
 
 **Étape 1 : Récupérer les nouveaux messages**
 
@@ -178,15 +178,16 @@ Contrat recommandé pour le payload inter-skill :
   "attachments": [],
   "property_id": "{property_id_or_empty}",
   "lead_id": "{lead_id_or_empty}",
-  "message_type": "{new_lead|qualification_reply|visit_confirmation|visit_reschedule|feedback_reply|offer|document|unknown}",
+  "message_type": "{new_lead|visit_confirmation|visit_reschedule|feedback_reply|offer|document|unknown}",
   "suggested_action": "{short_action}"
 }
 ```
 
+Note : `qualification_reply` a été retiré du routage email. La qualification lead passe désormais par Google Forms + tab `Qualifications` dans `visits`.
+
 Pour `visits`, préférer ces `message_type` :
 
 - `new_lead`
-- `qualification_reply`
 - `visit_confirmation`
 - `visit_reschedule`
 - `feedback_reply`
@@ -201,7 +202,7 @@ gws gmail messages get --params '{"id": "{message_id}", "format": "minimal"}'
 
 Tout email sortant suit ce flow exact par défaut.
 
-Exception possible à terme, mais uniquement si elle est activée explicitement dans le setup agent : les emails de pré-qualification Immoweb peuvent passer en auto-send. Sans cette règle explicite, rester en `always-approve`.
+Exception possible à terme, mais uniquement si elle est activée explicitement dans le setup agent : les emails de lien formulaire Immoweb peuvent passer en auto-send. Sans cette règle explicite, rester en `always-approve`.
 
 **Étape 1 : Préparation du contenu**
 
@@ -221,7 +222,7 @@ Ajouter automatiquement le bloc signature :
 
 Templates attendus pour `visits` :
 
-- `email-visit-qualification-{lang}.md`
+- `email-lead-form-{lang}.md`
 - `email-visit-proposal-{lang}.md`
 - `email-visit-feedback-{lang}.md`
 
@@ -661,7 +662,7 @@ Consulte `CONVENTIONS.md` section 2.9 pour la liste complète. Les placeholders 
 
 | Job | Fréquence | Condition | Action |
 |-----|-----------|-----------|--------|
-| **Gmail polling** | Toutes les 15 min | Toujours actif | `gws gmail messages list --params '{"q": "is:unread in:inbox"}'` → classifier et router chaque message non lu. Fallback si Pub/Sub est indisponible. |
+| **Gmail reconciliation** | Toutes les 2h (`08:00`-`22:00`) | Toujours actif | `gws gmail messages list --params '{"q": "is:unread in:inbox"}'` → classifier et router chaque message non lu. Fallback si Pub/Sub est indisponible ou a raté un événement. |
 | **Brouillons orphelins** | Toutes les 24h (8h) | Toujours actif | `gws gmail drafts list` → si un brouillon existe depuis >24h sans réponse agent → rappel Telegram : "[Rappel] {count} brouillon(s) en attente d'approbation." |
 | **Retry envois échoués** | Toutes les 5 min (après échec) | File retry non vide | Réessayer les envois échoués (max 3 tentatives). Si 3 échecs → notifier l'agent. |
 
@@ -713,7 +714,7 @@ Non bloquant. Logger et ignorer. Le brouillon restera dans Gmail — sera nettoy
 
 ### Gmail API indisponible
 
-1. Basculer sur le cron 15min (polling au lieu de Pub/Sub)
+1. Basculer sur le sweep 2h (`08:00`-`22:00`) tant que Pub/Sub reste indisponible
 2. Si le polling échoue aussi → notifier l'agent :
 
 **FR** :
