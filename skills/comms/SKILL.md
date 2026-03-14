@@ -1,19 +1,19 @@
 ---
 name: comms
 description: >
-  Gmail routing hub. Classifies inbound emails and routes to the right skill.
+  Email routing hub. Classifies inbound emails and routes to the right skill.
   Manages outbound email with always-approve flow (draft → Telegram preview → send).
   Handles Immoweb lead intake and runs continuously as the communication gateway
   for all other skills.
 user-invocable: true
 metadata:
   author: TreeLaunch
-  version: 1.0.0
+  version: 1.1.0
   category: real-estate
-  tags: [agent-immo, belgique, immobilier, gmail, email-routing]
+  tags: [agent-immo, belgique, immobilier, email-routing, agentmail]
 ---
 
-# Comms — Gmail Routing Hub
+# Comms — Email Routing Hub
 
 Passerelle email centrale. Classe les emails entrants et les route vers le skill approprié. Gère tous les emails sortants via le flow always-approve (brouillon → preview Telegram → envoi sur confirmation).
 
@@ -29,7 +29,8 @@ Pour les leads Immoweb, `comms` doit détecter les nouveaux leads très tôt et 
 
 | Source | Signal | Action |
 |--------|--------|--------|
-| Gmail Pub/Sub | Nouveau message reçu | Classifier et router |
+| AgentMail webhook (par défaut) | Nouveau message reçu | Classifier et router |
+| Gmail Pub/Sub (legacy) | Nouveau message reçu | Classifier et router |
 | Sweep 2h (08:00-22:00) | Polling fallback | Récupérer les messages non traités |
 | Agent Telegram | "check email", "mail ?", "nieuwe mail ?" | Forcer un check immédiat |
 
@@ -52,20 +53,22 @@ Trigger phrases exactes :
 
 ## 3. Prérequis
 
-- `gws auth` configuré avec scopes Gmail, Sheets, Drive
-- Gmail Pub/Sub watch actif (ou sweep 2h de `08:00` à `22:00` comme fallback)
-- Pipeline sheet accessible : `{pipeline_sheet_id}`
-- Tab `Leads` lisible pour le lookup des contacts connus
-- Tab `Properties` lisible pour le lookup des vendeurs et biens
+- AgentMail connecté et disponible (par défaut)
+- Connecteur email legacy (Gmail via `gws`) optionnel si AgentMail n'est pas utilisé
+- Store interne lisible pour le lookup des leads, contacts vendeurs, et contexte bien
 - `MEMORY.md` accessible pour les contacts connus (certificateurs, inspecteurs, notaires, syndics)
 
 ## 4. Flux
 
 ### 4.1 Inbound — Réception et classification
 
-Déclenché par Gmail Pub/Sub, par sweep de réconciliation toutes les 2 heures entre `08:00` et `22:00`, ou à la demande de l'agent.
+Déclenché par AgentMail webhook (par défaut), par Gmail Pub/Sub en mode legacy, par sweep de réconciliation toutes les 2 heures entre `08:00` et `22:00`, ou à la demande de l'agent.
 
 **Étape 1 : Récupérer les nouveaux messages**
+
+Par défaut, lire les nouveaux messages via AgentMail.
+
+Chemin legacy possible via Gmail:
 
 ```bash
 gws gmail messages list --params '{"q": "is:unread in:inbox", "maxResults": 20}'
@@ -82,17 +85,10 @@ Extraire : `from`, `to`, `subject`, `date`, `body` (text/plain ou text/html déc
 **Étape 2 : Identifier l'expéditeur**
 
 1. Extraire l'adresse email de l'expéditeur depuis le header `From`
-2. Chercher dans le tab Leads du pipeline sheet :
-   ```bash
-   gws sheets spreadsheets.values get --params '{"spreadsheetId": "{pipeline_sheet_id}", "range": "Leads!A:N"}'
-   ```
-   → Si match sur colonne E (Email) → récupérer le Property ID (col B) → router vers le contexte de ce bien
-3. Chercher dans le tab Properties :
-   ```bash
-   gws sheets spreadsheets.values get --params '{"spreadsheetId": "{pipeline_sheet_id}", "range": "Properties!A:X"}'
-   ```
-   → Si match sur colonne H (Seller Email) → router vers le contexte de ce bien
-4. Chercher dans `MEMORY.md` → si l'expéditeur est un certificateur, inspecteur, notaire, ou syndic connu → router vers le skill dossier avec le bien associé
+2. Chercher dans le store interne des leads → si match sur email lead, récupérer `lead_id` et `property_id`
+3. Chercher dans le store interne des propriétés/contacts vendeurs → si match, récupérer `property_id`
+4. Chercher dans `MEMORY.md` → si l'expéditeur est un certificateur, inspecteur, notaire, ou syndic connu, router vers le skill dossier avec le bien associé
+5. Si seul un backend legacy sheet est disponible, autoriser un lookup ponctuel comme fallback opérateur, sans en faire la source canonique
 
 **Étape 3 : Classifier par sujet (si expéditeur inconnu ou multi-biens)**
 
@@ -183,7 +179,7 @@ Contrat recommandé pour le payload inter-skill :
 }
 ```
 
-Note : `qualification_reply` a été retiré du routage email. La qualification lead passe désormais par Google Forms + tab `Qualifications` dans `visits`.
+Note : `qualification_reply` a été retiré du routage email. La qualification lead passe désormais par un formulaire public simple + ingestion dans le store interne de `visits`.
 
 Pour `visits`, préférer ces `message_type` :
 
@@ -404,26 +400,20 @@ Alles versturen? (ok / detail / annuleren)
 
 ### Fichiers lus
 
-| Fichier / Sheet | Usage |
+| Fichier / source | Usage |
 |-----------------|-------|
-| Pipeline sheet — tab Properties (A:X) | Lookup vendeur par email (col H), contexte du bien |
-| Pipeline sheet — tab Leads (A:N) | Lookup acheteur/lead par email (col E) |
+| Store interne leads/properties | Lookup lead/vendeur par email, contexte du bien |
 | `MEMORY.md` | Contacts connus : certificateurs, inspecteurs, notaires, syndics |
 | `templates/email-*.md` | 8 templates email (FR + NL) |
+| Pipeline sheet (legacy, optionnel) | Fallback de lookup opérateur uniquement |
 
 ### Fichiers écrits
 
-| Fichier / Sheet | Ce qui est modifié |
+| Fichier / source | Ce qui est modifié |
 |-----------------|-------------------|
-| Pipeline sheet — tab Properties col W | `Updated` : date ISO à chaque action email liée à un bien |
-| Pipeline sheet — tab Properties col X | `Notes` : log des emails envoyés/reçus si pertinent |
+| Store interne | Métadonnées email, liens lead/property, statut de traitement |
 | `MEMORY.md` | Ajout de nouveaux contacts identifiés par email |
-
-### Colonnes pipeline utilisées
-
-**Properties** : A (ID), B (Address), C (Postal), D (Region), F (Seller), H (Seller Email), L (Drive URL), N (Docs Detail), W (Updated), X (Notes)
-
-**Leads** : A (Lead ID), B (Property ID), C (Name), E (Email), I (Status), L (Offer Amount), M (Notes)
+| Pipeline sheet (legacy, optionnel) | Update manuel si un client fonctionne encore avec ce backend |
 
 ## 6. Interactions inter-skills
 
@@ -662,8 +652,8 @@ Consulte `CONVENTIONS.md` section 2.9 pour la liste complète. Les placeholders 
 
 | Job | Fréquence | Condition | Action |
 |-----|-----------|-----------|--------|
-| **Gmail reconciliation** | Toutes les 2h (`08:00`-`22:00`) | Toujours actif | `gws gmail messages list --params '{"q": "is:unread in:inbox"}'` → classifier et router chaque message non lu. Fallback si Pub/Sub est indisponible ou a raté un événement. |
-| **Brouillons orphelins** | Toutes les 24h (8h) | Toujours actif | `gws gmail drafts list` → si un brouillon existe depuis >24h sans réponse agent → rappel Telegram : "[Rappel] {count} brouillon(s) en attente d'approbation." |
+| **Email reconciliation** | Toutes les 2h (`08:00`-`22:00`) | Toujours actif | Scanner les messages non traités via AgentMail (ou Gmail legacy) puis classifier/router. |
+| **Brouillons orphelins** | Toutes les 24h (8h) | Toujours actif | Lister les brouillons du backend email actif → si un brouillon existe depuis >24h sans réponse agent, envoyer un rappel Telegram. |
 | **Retry envois échoués** | Toutes les 5 min (après échec) | File retry non vide | Réessayer les envois échoués (max 3 tentatives). Si 3 échecs → notifier l'agent. |
 
 ## 10. Gestion d'erreurs
@@ -712,7 +702,23 @@ gws gmail drafts send → erreur
 
 Non bloquant. Logger et ignorer. Le brouillon restera dans Gmail — sera nettoyé par le cron "brouillons orphelins".
 
-### Gmail API indisponible
+### Backend email indisponible
+
+1. Si AgentMail est indisponible, basculer temporairement sur le connecteur legacy (Gmail via `gws`) si configuré
+2. Sinon, basculer sur le sweep 2h (`08:00`-`22:00`) tant que le webhook n'est pas fiable
+3. Si le polling échoue aussi, notifier l'agent :
+
+**FR** :
+```
+Le backend email est temporairement indisponible. Je réessaie automatiquement. Si le problème persiste, vérifiez la connexion AgentMail ou l'auth Gmail legacy.
+```
+
+**NL** :
+```
+De email-backend is tijdelijk onbeschikbaar. Ik probeer automatisch opnieuw. Als het probleem aanhoudt, controleer AgentMail of de legacy Gmail-authenticatie.
+```
+
+### Gmail API indisponible (mode legacy)
 
 1. Basculer sur le sweep 2h (`08:00`-`22:00`) tant que Pub/Sub reste indisponible
 2. Si le polling échoue aussi → notifier l'agent :
