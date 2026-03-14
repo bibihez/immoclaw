@@ -201,9 +201,14 @@ If the property match is ambiguous, stop at draft stage and ask the agent to con
 
 ### 2. Qualification Via Simple Public Form
 
-For new inbound sale leads, send a simple public form link instead of a long qualification email. The form should be mobile-friendly, available in FR/NL, and write answers directly into the internal lead store.
+La qualification dépend désormais du `listing_type` :
 
-Google Forms are no longer the default path. A Google Form may still exist as a legacy fallback, but it should not be the primary product assumption.
+- Si `listing_type == "sale"` : logique existante (budget, financement, timing).
+- Si `listing_type == "rental"` : screening locataire (revenus, emploi, garant, préavis).
+
+Les deux chemins convergent vers le même résultat opérationnel : lead `qualified` (ou `closed` si hors-cible explicite).
+
+Pour les leads location, utiliser un formulaire de qualification dédié (FR/NL) et appliquer un scoring `green` / `orange` / `red` avant proposition de créneaux.
 
 **Step 1: Send the form link**
 
@@ -424,7 +429,7 @@ Include:
 - project timing if known
 - key property facts: bedrooms, bathrooms, area, PEB, asking price, known works
 
-FR format:
+FR format (vente):
 
 ```text
 VISITE DEMAIN à {time_formatted} - {adresse}
@@ -435,6 +440,18 @@ Points clés du bien :
 - PEB {property.peb_score}
 - Travaux / points d'attention : {property.works_summary}
 Prix affiché : {property.price_asked} EUR
+```
+
+FR format (location):
+
+```text
+VISITE DEMAIN à {time_formatted} - {adresse}
+Locataire : {lead_name} | Tél: {lead_phone}
+Revenus : {monthly_income}€/mois | Emploi: {employment_type}
+Garant : {has_guarantor}
+Loyer : {monthly_rent}€/mois + {charges}€ charges
+Disponibilité : {desired_timing}
+Points clés : {property.surface_habitable}m², {property.bedrooms} ch., {furnished_status}
 ```
 
 ### 6. Post-Visit Feedback

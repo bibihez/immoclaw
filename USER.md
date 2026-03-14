@@ -22,12 +22,21 @@ google:
 
 forms:
   qualification:
-    fr_prefill_url_template: ""  # Google Forms prefill URL with {lead_id}
-    nl_prefill_url_template: ""  # Google Forms prefill URL with {lead_id}
+    fr_prefill_url_template_sale: ""    # Google Forms prefill URL with {lead_id}
+    fr_prefill_url_template_rental: ""  # Google Forms prefill URL with {lead_id}
+    nl_prefill_url_template_sale: ""    # Google Forms prefill URL with {lead_id}
+    nl_prefill_url_template_rental: ""  # Google Forms prefill URL with {lead_id}
 
 preferences:
+  listing_types:
+    - "sale"
+    - "rental"
   working_hours: "08:00-19:00"
   working_days: "mon-sat"
+  rental_availability_hours: "09:00-20:00"
+  min_rental_income_ratio: 3.0
+  require_guarantor_below_income: 2500
+  min_commission_sale: 5000
   morning_briefing_time: "07:30"
   weekly_digest_day: "monday"
   email_approval: "always"    # always = chaque email nécessite approbation Telegram

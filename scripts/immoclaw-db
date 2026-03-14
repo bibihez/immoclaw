@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""SQLite CLI for immoclaw lead/rental tracking."""
+
+from __future__ import annotations
+
+import argparse
+import sqlite3
+from pathlib import Path
+
+DB_PATH = Path(__file__).resolve().parent.parent / "immoclaw.db"
+
+
+def connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS properties (id TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS leads (lead_id TEXT PRIMARY KEY)")
+    cols = conn.execute("PRAGMA table_info(properties)").fetchall()
+    col_names = {row[1] for row in cols}
+    if "listing_type" not in col_names:
+        conn.execute(
+            """
+            ALTER TABLE properties ADD COLUMN listing_type TEXT
+            CHECK(listing_type IN ('sale', 'rental', 'unknown') OR listing_type IS NULL)
+            """
+        )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rental_details (
+            property_id TEXT PRIMARY KEY,
+            monthly_rent REAL,
+            charges REAL,
+            deposit_months INTEGER DEFAULT 2,
+            furnished INTEGER DEFAULT 0,
+            min_income_ratio REAL DEFAULT 3.0,
+            availability_date TEXT,
+            lease_duration TEXT,
+            pets_allowed TEXT,
+            smoking_allowed INTEGER DEFAULT 0,
+            certificate_habitability TEXT,
+            electrical_inspection TEXT,
+            energy_performance TEXT,
+            FOREIGN KEY (property_id) REFERENCES properties(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tenant_screening (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id TEXT,
+            property_id TEXT,
+            monthly_income REAL,
+            employment_type TEXT,
+            employment_duration TEXT,
+            has_guarantor INTEGER DEFAULT 0,
+            guarantor_income REAL,
+            current_housing TEXT,
+            notice_period TEXT,
+            number_of_tenants INTEGER,
+            has_pets INTEGER DEFAULT 0,
+            smoker INTEGER DEFAULT 0,
+            screening_score TEXT,
+            screening_notes TEXT,
+            screened_at TEXT,
+            FOREIGN KEY (lead_id) REFERENCES leads(lead_id),
+            FOREIGN KEY (property_id) REFERENCES properties(id)
+        )
+        """
+    )
+    conn.commit()
+
+
+def bool_to_int(value: str | None) -> int:
+    if not value:
+        return 0
+    return 1 if value.strip().upper() in {"Y", "YES", "1", "TRUE", "OUI"} else 0
+
+
+def rental_add(args: argparse.Namespace) -> None:
+    with connect() as conn:
+        migrate(conn)
+        conn.execute(
+            """
+            INSERT INTO rental_details (
+                property_id, monthly_rent, charges, furnished, availability_date
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(property_id) DO UPDATE SET
+                monthly_rent=excluded.monthly_rent,
+                charges=excluded.charges,
+                furnished=excluded.furnished,
+                availability_date=excluded.availability_date
+            """,
+            (args.property_id, args.monthly_rent, args.charges, bool_to_int(args.furnished), args.availability_date),
+        )
+        conn.commit()
+    print("ok")
+
+
+def rental_get(args: argparse.Namespace) -> None:
+    with connect() as conn:
+        migrate(conn)
+        row = conn.execute("SELECT * FROM rental_details WHERE property_id = ?", (args.property_id,)).fetchone()
+    print(dict(row) if row else "not_found")
+
+
+def rental_update(args: argparse.Namespace) -> None:
+    sets, values = [], []
+    for field in ["monthly_rent", "charges", "availability_date"]:
+        value = getattr(args, field)
+        if value is not None:
+            sets.append(f"{field} = ?")
+            values.append(value)
+    if args.furnished is not None:
+        sets.append("furnished = ?")
+        values.append(bool_to_int(args.furnished))
+    if not sets:
+        raise SystemExit("No fields to update")
+
+    values.append(args.property_id)
+    with connect() as conn:
+        migrate(conn)
+        conn.execute(f"UPDATE rental_details SET {', '.join(sets)} WHERE property_id = ?", values)
+        conn.commit()
+    print("ok")
+
+
+def screening_add(args: argparse.Namespace) -> None:
+    with connect() as conn:
+        migrate(conn)
+        conn.execute(
+            """
+            INSERT INTO tenant_screening (
+                lead_id, property_id, monthly_income, employment_type, employment_duration,
+                has_guarantor, guarantor_income, current_housing, notice_period,
+                number_of_tenants, has_pets, smoker, screening_score, screening_notes, screened_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (
+                args.lead_id,
+                args.property_id,
+                args.monthly_income,
+                args.employment_type,
+                args.employment_duration,
+                bool_to_int(args.has_guarantor),
+                args.guarantor_income,
+                args.current_housing,
+                args.notice_period,
+                args.number_of_tenants,
+                bool_to_int(args.has_pets),
+                bool_to_int(args.smoker),
+                args.screening_score,
+                args.screening_notes,
+            ),
+        )
+        conn.commit()
+    print("ok")
+
+
+def screening_list(args: argparse.Namespace) -> None:
+    with connect() as conn:
+        migrate(conn)
+        rows = conn.execute(
+            "SELECT * FROM tenant_screening WHERE property_id = ? ORDER BY screened_at DESC", (args.property_id,)
+        ).fetchall()
+    for row in rows:
+        print(dict(row))
+
+
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="immoclaw-db")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    rental = sub.add_parser("rental")
+    rental_sub = rental.add_subparsers(dest="subcmd", required=True)
+
+    rental_add_p = rental_sub.add_parser("add")
+    rental_add_p.add_argument("--property-id", required=True)
+    rental_add_p.add_argument("--monthly-rent", required=True, type=float)
+    rental_add_p.add_argument("--charges", type=float, default=0)
+    rental_add_p.add_argument("--furnished", default="N")
+    rental_add_p.add_argument("--availability-date")
+    rental_add_p.set_defaults(func=rental_add)
+
+    rental_get_p = rental_sub.add_parser("get")
+    rental_get_p.add_argument("--property-id", required=True)
+    rental_get_p.set_defaults(func=rental_get)
+
+    rental_update_p = rental_sub.add_parser("update")
+    rental_update_p.add_argument("--property-id", required=True)
+    rental_update_p.add_argument("--monthly-rent", type=float)
+    rental_update_p.add_argument("--charges", type=float)
+    rental_update_p.add_argument("--furnished")
+    rental_update_p.add_argument("--availability-date")
+    rental_update_p.set_defaults(func=rental_update)
+
+    screening = sub.add_parser("screening")
+    screening_sub = screening.add_subparsers(dest="subcmd", required=True)
+
+    screening_add_p = screening_sub.add_parser("add")
+    screening_add_p.add_argument("--lead-id", required=True)
+    screening_add_p.add_argument("--property-id", required=True)
+    screening_add_p.add_argument("--monthly-income", required=True, type=float)
+    screening_add_p.add_argument("--employment-type", required=True)
+    screening_add_p.add_argument("--employment-duration", default="")
+    screening_add_p.add_argument("--has-guarantor", default="N")
+    screening_add_p.add_argument("--guarantor-income", type=float)
+    screening_add_p.add_argument("--current-housing")
+    screening_add_p.add_argument("--notice-period")
+    screening_add_p.add_argument("--number-of-tenants", type=int)
+    screening_add_p.add_argument("--has-pets", default="N")
+    screening_add_p.add_argument("--smoker", default="N")
+    screening_add_p.add_argument("--screening-score")
+    screening_add_p.add_argument("--screening-notes")
+    screening_add_p.set_defaults(func=screening_add)
+
+    screening_list_p = screening_sub.add_parser("list")
+    screening_list_p.add_argument("--property-id", required=True)
+    screening_list_p.set_defaults(func=screening_list)
+
+    return p
+
+
+def main() -> None:
+    args = parser().parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
