@@ -10,6 +10,10 @@ agent:
   formality: "vous"           # vous/tu (FR) ou u/je (NL)
   phone: ""
 
+agentmail:
+  api_key: ""
+  inbox_id: ""
+
 google:
   email: ""
   calendar_id: "primary"
