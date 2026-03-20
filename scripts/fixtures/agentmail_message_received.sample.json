@@ -1,0 +1,28 @@
+{
+  "type": "event",
+  "event_type": "message.received",
+  "event_id": "evt_sample_agentmail_001",
+  "message": {
+    "inbox_id": "myagent@agentmail.to",
+    "thread_id": "thd_sample_001",
+    "message_id": "msg_sample_001",
+    "from": [
+      {
+        "name": "Immoweb Leads",
+        "email": "leads@immoweb.be"
+      }
+    ],
+    "to": [
+      {
+        "name": "Agent",
+        "email": "myagent@agentmail.to"
+      }
+    ],
+    "subject": "Immoweb lead - Avenue Louise 50",
+    "text": "Nom: Alice Martin\nAdresse mail: alice@example.com\nTéléphone: +32 470 11 22 33\nBien: Avenue Louise 50\n1050 Ixelles\nPrix: 325.000 €\n",
+    "timestamp": "2026-03-20T20:00:00Z",
+    "labels": [
+      "received"
+    ]
+  }
+}

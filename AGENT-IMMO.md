@@ -3,6 +3,11 @@
 > AI Assistant for Belgian Real Estate Agents, built on OpenClaw
 > Separate product from FSBO Vendeur | Bilingual FR/NL | Full pipeline from day 1
 
+> Production path note: the current production-ready foundation now centers on
+> `AgentMail + Cal.com managed service + SQLite + Telegram`. See
+> `PRODUCTION-STACK.md` for the canonical runtime stack while this guide is
+> being simplified.
+
 ---
 
 ## 1. What Is Agent Immo

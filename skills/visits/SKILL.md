@@ -3,7 +3,7 @@ name: visits
 description: >
   Manage property visits for a Belgian real-estate agent: parse Immoweb leads,
   send a simple qualification form link, auto-qualify structured responses from
-  the internal lead store, propose visit slots from Google Calendar
+  the internal lead store, propose visit slots from managed Cal.com
   availability, proactively discuss timing with the agent on Telegram, book
   confirmed visits, send agent briefing cards, and follow up for feedback.
 user-invocable: true
@@ -22,7 +22,7 @@ Use this skill to handle visit logistics for a real-estate agent in Belgium. The
 2. pre-qualify the lead automatically
 3. suggest the best timing to the agent on Telegram
 4. propose visit slots to leads only after agent validation or explicit autonomy rules
-5. book the visit in Google Calendar
+5. book the visit through Cal.com on the agent's real calendar
 6. brief the agent before the visit
 7. collect feedback after the visit
 
@@ -35,7 +35,7 @@ Optimize for the smoothest possible onboarding.
 - The client should keep using daily tools only: email, calendar, and Telegram.
 - Technical complexity, hidden state, and manual cleanup can stay on the operator side.
 - `AgentMail` is the default email strategy for the pilot.
-- `Composio` is the default Google Calendar connection layer for the pilot.
+- `Cal.com` is the default managed booking layer for the pilot.
 - Do not require a client-facing CRM, Google Sheet, Airtable base, or backoffice in the critical path.
 
 ## OpenClaw Mode
@@ -84,7 +84,7 @@ Typical user phrases:
 
 Minimum useful inputs:
 
-- a readable Google Calendar source connected through Composio; target the agent's main calendar first by using `{USER.google.calendar_id}` with default `primary`
+- a managed Cal.com account connected to the agent's real calendar, with `{USER.calcom.username}` and event type slugs configured
 - `{USER.preferences.working_hours}` such as `09:00-20:00`
 - an inbound email path through AgentMail, `comms`, or a forwarding inbox
 - Telegram access through OpenClaw
@@ -96,7 +96,7 @@ Optional but useful:
 
 - property-level constraints already stored somewhere
 - a private operator workspace for manual review and cleanup
-- a fallback calendar ID if the primary calendar cannot be connected quickly
+- a fallback private event type or temporary schedule override if onboarding is still in progress
 
 Useful optional preferences:
 
@@ -105,16 +105,16 @@ Useful optional preferences:
 - `{USER.preferences.preferred_visit_days}`
 - `{USER.preferences.zone_preferences}` such as `Bruxelles sud le mardi`
 
-AgentMail is the default email path for the pilot, but direct Gmail access is not required. Google Sheets are no longer the standard tracking layer. If a legacy sheet exists, treat it as an optional fallback or migration aid, not as the canonical source of truth.
+AgentMail is the default email path for the pilot, and Cal.com is the default managed booking backend. Google Sheets are no longer the standard tracking layer. If a legacy sheet exists, treat it as an optional fallback or migration aid, not as the canonical source of truth.
 
 ## Calendar Policy
 
 The system should work in the agent's real daily calendar whenever possible.
 
-- Preferred mode: use the Google account's main calendar with calendar ID `primary`.
-- Fallback mode: if primary calendar access blocks onboarding, use a dedicated temporary calendar and label that setup clearly as a temporary compromise.
+- Preferred mode: use Cal.com on top of the agent's real connected calendar.
+- Fallback mode: if the permanent event type setup is not ready yet, use a temporary private event type or restricted schedule and label that explicitly as a temporary compromise.
 - Always state which mode is active in operator notes when calendar connectivity is incomplete or degraded.
-- Never silently downgrade from `primary` to a fallback calendar without telling the operator.
+- Never silently downgrade from the primary booking setup to a fallback one without telling the operator.
 
 ## Operating Rules
 
@@ -300,15 +300,15 @@ Lead fermé automatiquement.
 
 Run this only for `qualified` leads, or when the agent explicitly says to skip qualification.
 
-1. Read calendar events from tomorrow through the next 7 days from the connected Google Calendar source. Use `primary` by default.
+1. Read available slots or busy windows from tomorrow through the next 7 days from the managed Cal.com setup.
 
 Example preferred command path:
 
 ```bash
-composio googlecalendar events.list --calendar-id primary --time-min "{date_demain_iso}" --time-max "{date_plus_7j_iso}"
+python scripts/calcom_client.py slots --event-slug "{private_visit_event_slug}" --start-time "{date_demain_iso}" --end-time "{date_plus_7j_iso}"
 ```
 
-If the primary calendar is unavailable but the onboarding must continue, use the dedicated fallback calendar and note that explicitly in operator context.
+If the primary booking setup is unavailable but onboarding must continue, use a temporary restricted event type or schedule and note that explicitly in operator context.
 
 2. Generate 2 to 3 realistic visit options inside working hours. When the qualification form includes `preferred_days`, filter the generated slots to those day-parts first and only fall back to the default logic if no valid slot remains.
 3. Prefer grouped tours when several qualified leads exist in the same area.
@@ -385,18 +385,18 @@ If capacity rules are unknown and the proposed slot may create grouped visits, a
 When the lead confirms one slot:
 
 1. Re-check that the slot is still free.
-2. Create the calendar event in the main connected Google Calendar when possible.
+2. Create the booking in Cal.com so it lands on the agent's connected real calendar.
 
 Example preferred command path:
 
 ```bash
-composio googlecalendar events.create --calendar-id primary --summary "[Visite] {adresse} - {lead_name}" --start "{selected_start_time}" --end "{selected_end_time}" --description "Tel: {lead_phone}\nEmail: {lead_email}\nProperty ID: {property_id}"
+python scripts/calcom_client.py book --event-slug "{private_visit_event_slug}" --start "{selected_start_time}" --attendee-name "{lead_name}" --attendee-email "{lead_email}" --attendee-timezone "Europe/Brussels" --fields-json '{"property_id":"{property_id}","lead_id":"{lead_id}","notes":"{adresse}"}'
 ```
 
 3. Update the internal lead record:
    - status: `visit_scheduled`
    - scheduled datetime
-   - active calendar mode: `primary` or `fallback`
+   - active booking mode: `calcom_primary` or `calcom_fallback`
 4. Notify the agent on Telegram.
 
 FR message:
@@ -494,7 +494,7 @@ When the skill reasons about a lead or a proposed visit, prefer these compact ou
 
 ## Proactive Weekly Planning
 
-Use this when the agent wants the system to suggest visit windows proactively from the synced calendar.
+Use this when the agent wants the system to suggest visit windows proactively from the synced calendar and managed booking stack.
 
 Run every Friday at `17:00`, on heartbeat, or on demand:
 
@@ -548,18 +548,18 @@ Examples:
 If the agent asks for an open house:
 
 1. update the property status in the internal store or operator workspace
-2. create the visit blocks in calendar
+2. create the visit blocks in Cal.com with seats or fixed private slots
 3. invite all relevant qualified leads via AgentMail or `comms`
 4. send the agent a recap the day before
 
-Prefer fixed 30-minute slots and avoid overbooking.
+Prefer fixed 30-minute slots, use `seats` when relevant, and avoid overbooking.
 
 ## Exceptions and Failure Modes
 
 - Missing phone number: continue by email only.
 - Unclear property match: ask the agent before creating visit proposals.
 - Calendar conflict or double booking: regenerate slots instead of forcing a booking.
-- Primary calendar unavailable at onboarding: use the fallback dedicated calendar temporarily and flag that mode clearly.
+- Primary booking setup unavailable at onboarding: use the fallback private event type or restricted schedule temporarily and flag that mode clearly.
 - Agent slow to answer: do not auto-confirm; send a short reminder on Telegram.
 - Lead never fills the form: if a lead stays `form_sent` for more than 48h, notify the agent on Telegram: `Relancer ou fermer ?` / `Opnieuw contacteren of sluiten?`
 - Lead silent after slot proposal: keep the thread open, but do not over-commit or spam follow-ups unless instructed.

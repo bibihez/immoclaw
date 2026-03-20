@@ -1,0 +1,21 @@
+{
+  "triggerEvent": "BOOKING_CREATED",
+  "createdAt": "2026-03-20T20:05:00.000Z",
+  "payload": {
+    "uid": "booking_sample_001",
+    "startTime": "2026-03-28T10:00:00+01:00",
+    "location": "Avenue Louise 50, 1050 Ixelles",
+    "metadata": {
+      "lead_id": "lead_sample_001",
+      "property_id": "prop_sample_001"
+    },
+    "attendees": [
+      {
+        "email": "alice@example.com",
+        "name": "Alice Martin",
+        "timeZone": "Europe/Brussels"
+      }
+    ],
+    "status": "ACCEPTED"
+  }
+}
