@@ -1,0 +1,323 @@
+name: ocr-crm
+version: 0.2.0
+goal: extract structured data from OCR inputs and send it to the correct Zabun resource
+product_principle: internal_draft_then_zabun_push
+
+zabun_auth:
+  heartbeat_endpoint: GET /auth/v1/heartbeat
+  headers:
+    required:
+      - X-CLIENT-ID
+      - api_key
+      - client_id
+      - server_id
+    optional_but_expected:
+      - X-USER-ID
+      - Accept-Language
+  rules:
+    - header names are case-sensitive
+    - do not send Authorization when using api_key authentication
+
+channels:
+  ingress:
+    - telegram_photo
+    - telegram_document
+    - telegram_voice
+    - forwarded_scan
+  egress:
+    - telegram_summary
+    - zabun_api
+
+mvp_scope:
+  supported_resources:
+    - property
+    - contact
+    - contactmessage
+    - contactrequest
+  non_goals:
+    - relying on a Zabun draft mode
+    - unchecked direct OCR to production
+    - auto-setting consent flags without proof
+
+lookup_cache:
+  property_option_items:
+    endpoint: GET /api/v1/property/option_items
+    contains:
+      - transactions
+      - types
+      - status
+      - mandate_types
+      - offices
+  contact_option_items:
+    endpoint: GET /api/v1/contact/option_items
+    contains:
+      - status
+      - titles
+      - roles
+      - lead_sources
+  geo:
+    endpoints:
+      - POST /api/v1/geo/cities/search
+      - GET /api/v1/geo/cities
+      - GET /api/v1/geo/countries
+
+resource_map:
+  property:
+    create: POST /api/v1/property
+    update: PATCH /api/v1/property/{property_id}
+    search: POST /api/v1/property/search
+  contact:
+    create: POST /api/v1/contact
+    update: PATCH /api/v1/contact/{contact_autoid}
+    search: POST /api/v1/contact/search
+  contactmessage:
+    create: POST /api/v1/contactmessage
+  contactrequest:
+    create: POST /api/v1/contactrequest
+
+pipeline:
+  - id: receive
+    output:
+      - session_id
+      - stored_assets
+  - id: normalize
+    output:
+      - normalized_assets
+      - quality_warnings
+  - id: ocr
+    output:
+      - raw_text
+      - ocr_blocks
+      - detected_locale
+  - id: classify_target_resource
+    output:
+      - target_resource
+      - target_confidence
+  - id: extract_internal_draft
+    output:
+      - internal_draft
+      - field_evidence
+  - id: preflight_zabun
+    output:
+      - heartbeat_ok
+      - option_items_cache
+      - geo_cache
+  - id: resolve_zabun_ids
+    output:
+      - transaction_id
+      - type_id
+      - status_id
+      - mandate_type_id
+      - title_id
+      - city_geo_id
+      - country_geo_id
+      - responsible_salesrep_person_id
+  - id: search_existing_records
+    output:
+      - duplicate_candidates
+      - recommended_action
+  - id: validate
+    output:
+      - blocking_errors
+      - warnings
+      - missing_critical_fields
+  - id: correct
+    input:
+      - user_text_patch
+      - user_voice_patch
+    output:
+      - updated_internal_draft
+  - id: build_request
+    output:
+      - endpoint
+      - method
+      - payload
+  - id: submit
+    output:
+      - zabun_object_id
+      - response_body
+
+state_machine:
+  - received
+  - normalized
+  - extracted
+  - resolving
+  - needs_review
+  - ready_to_push
+  - pushed
+  - failed
+  - expired
+
+internal_schema:
+  session_id: string
+  status: enum[received, normalized, extracted, resolving, needs_review, ready_to_push, pushed, failed, expired]
+  locale: string
+  target_resource: enum[property, contact, contactmessage, contactrequest, unsupported]
+  action: enum[create, patch]
+  source:
+    channel: string
+    assets:
+      - asset_id: string
+        kind: enum[image, pdf_page, audio, text]
+        mime_type: string
+        checksum: string
+  contact:
+    first_name: string?
+    last_name: string?
+    email: string?
+    mobile: string?
+    mobile_cc: string?
+    language: string?
+    consent:
+      mailing_opt_in: boolean?
+      marketing_opt_in: boolean?
+  property:
+    title: string?
+    price: number?
+    show: boolean?
+    transaction_label: string?
+    type_label: string?
+    status_label: string?
+    mandate_type_label: string?
+    mandate_start: string?
+    address:
+      street: string?
+      number: string?
+      box: string?
+      postal_code: string?
+      city: string?
+  request:
+    price_min: number?
+    price_max: number?
+    city_labels: [string]
+    type_labels: [string]
+    transaction_labels: [string]
+    rooms: integer?
+  message:
+    text: string?
+    property_id: integer?
+    info: [string]
+  field_evidence:
+    any_field:
+      value: any
+      confidence: number
+      asset_id: string
+      page: integer?
+      snippet: string?
+  validation:
+    is_blocked: boolean
+    blocking_errors: [string]
+    warnings: [string]
+    missing_critical_fields: [string]
+  zabun_resolution:
+    property_id: integer?
+    contact_autoid: integer?
+    transaction_id: integer?
+    type_id: integer?
+    status_id: integer?
+    mandate_type_id: integer?
+    title_id: integer?
+    city_geo_id: integer?
+    country_geo_id: integer?
+    responsible_salesrep_person_id: integer?
+  zabun_request:
+    endpoint: string?
+    method: string?
+    payload: object?
+
+critical_rules:
+  shared:
+    - reject push when target_resource is unsupported
+    - reject push when heartbeat fails
+    - reject push when a required Zabun ID cannot be resolved
+    - reject push when duplicate risk is high and action is still create
+  by_resource:
+    property:
+      required:
+        - property.show
+        - zabun_resolution.transaction_id
+        - zabun_resolution.type_id
+        - zabun_resolution.status_id
+        - zabun_resolution.mandate_type_id
+        - property.mandate_start
+        - zabun_resolution.responsible_salesrep_person_id
+        - property.address.number
+        - zabun_resolution.city_geo_id
+        - zabun_resolution.country_geo_id
+        - property.address.street
+      conditional:
+        - property.price is required in most sale/rent flows
+    contact:
+      required:
+        - contact.last_name
+        - zabun_resolution.title_id
+        - zabun_resolution.status_id
+        - zabun_resolution.responsible_salesrep_person_id
+    contactmessage:
+      required_any_of:
+        - [contact.email, contact.mobile]
+      required:
+        - contact.last_name
+        - contact.language
+        - zabun_resolution.property_id
+        - message.text
+      consent_rules:
+        - do not set consent flags to true without evidence
+    contactrequest:
+      required:
+        - contact.last_name
+        - contact.language
+      recommended_any_of:
+        - [request.price_min, request.price_max]
+        - [request.city_labels]
+        - [request.type_labels]
+        - [request.transaction_labels]
+
+prompts:
+  target_classifier: |
+    Classify the input into exactly one Zabun resource: property, contact,
+    contactmessage, contactrequest, or unsupported.
+    Prefer business correctness over generic CRM labels.
+  extractor: |
+    Extract only grounded values present in OCR or user corrections.
+    Return null for missing values. Keep short evidence and confidence on critical fields.
+  correction_merge: |
+    Apply user corrections over OCR output. User input overrides OCR values but never deletes the audit trail.
+  zabun_validator: |
+    Validate the internal draft against the target Zabun endpoint, required IDs,
+    consent rules, and duplicate risk. Return blocking_errors and missing_critical_fields.
+
+integrations:
+  zabun:
+    heartbeat: GET /auth/v1/heartbeat
+    create_endpoints:
+      - POST /api/v1/property
+      - POST /api/v1/contact
+      - POST /api/v1/contactmessage
+      - POST /api/v1/contactrequest
+    update_endpoints:
+      - PATCH /api/v1/property/{property_id}
+      - PATCH /api/v1/contact/{contact_autoid}
+    search_endpoints:
+      - POST /api/v1/property/search
+      - POST /api/v1/contact/search
+
+error_handling:
+  heartbeat_failure: stop before any create or patch
+  ocr_failure: keep session open and ask for a cleaner photo
+  id_resolution_failure: block push and ask only for the unresolved label
+  duplicate_conflict: propose patch instead of create
+  validation_400: persist endpoint, payload, and exact Zabun error body
+  consent_uncertain: default consent flags to null or false, never true
+
+mvp_build_order:
+  - session storage and asset normalization
+  - OCR plus raw text capture
+  - target resource classification
+  - structured extraction to internal JSON
+  - Zabun heartbeat and lookup caches
+  - ID resolution and duplicate detection
+  - validation rules by Zabun resource
+  - text correction loop
+  - voice correction loop
+  - POST/PATCH to Zabun
