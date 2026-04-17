@@ -113,6 +113,24 @@ gws sheets spreadsheets.values get --params '{"spreadsheetId": "{USER.google.pip
 Compter les biens par statut (col E) : INTAKE, ACTIF, SOUS_OFFRE, COMPROMIS, VENDU.
 Pour chaque bien ACTIF, extraire : adresse (B), prix (I), docs progress (M), marketing status (O), active leads (P).
 
+**Étape 1bis — Segmenter vente/location**
+
+À partir de la source des leads/propriétés, segmenter systématiquement les métriques par `listing_type` (`sale` vs `rental`) pour le briefing et le digest.
+
+Exemple attendu dans les messages:
+
+```
+Vente:
+- 3 leads qualifiés cette semaine
+- 2 visites demain
+- 1 offre en attente
+
+Location:
+- 8 leads reçus (5 qualifiés, 2 screening, 1 rejeté)
+- 3 visites demain
+- 1 bail à signer
+```
+
 **Étape 2 — Visites de la semaine écoulée**
 
 ```bash
@@ -278,6 +296,27 @@ Achterstallige taken: {nb_overdue}
 
 ```
 DIGEST SEMAINE {date_debut} — {date_fin}
+
+Vente:
+- Leads qualifiés : {sale_qualified}
+- Visites : {sale_visits}
+- Offres : {sale_offers}
+
+Location:
+- Leads reçus : {rental_leads}
+- Qualifiés : {rental_qualified}
+- En screening : {rental_screening}
+- Rejetés : {rental_rejected}
+- Visites : {rental_visits}
+- Baux signés : {rental_leases_signed}
+
+Commissions prévues:
+- Vente: {sale_commission_forecast}€
+- Location: {rental_commission_forecast}€
+
+---
+
+Portefeuille :
 
 Portefeuille :
   INTAKE : {nb_intake}
